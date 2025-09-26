@@ -1,0 +1,119 @@
+# Git
+.gitmessage
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+finance_agents_env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Output files
+*.csv
+*.json
+*.xlsx
+output/
+
+# AI/ML specific
+*.pkl
+*.joblib
+*.h5
+*.pb
+*.onnx
+*.pt
+*.pth
+*.model
+*.weights
+models/trained/
+models/checkpoints/
+data/raw/
+data/processed/
+experiments/results/
+.mlruns/
+mlruns/
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# ChromaDB
+chroma_db/
+.chroma/
+
+# SQLite
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# API Keys and Secrets
+secrets.json
+config/secrets/
+
+# FastAPI
+.pytest_cache/
+
+# React/Node.js (for frontend)
+frontend/node_modules/
+frontend/build/
+frontend/.env
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# Financial data (sensitive)
+data/user_bank_data/
+data/sensitive/
