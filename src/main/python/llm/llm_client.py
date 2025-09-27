@@ -61,12 +61,19 @@ class OpenAIClient(BaseLLMClient):
         start_time = time.time()
 
         try:
+            # 避免參數重複：從 kwargs 中移除已處理的參數
+            api_kwargs = kwargs.copy()
+            max_tokens = api_kwargs.pop("max_tokens", 1000)
+            temperature = api_kwargs.pop("temperature", 0.7)
+            # 移除 model 參數以避免重複（使用實例初始化時的 model）
+            api_kwargs.pop("model", None)
+
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=kwargs.get("max_tokens", 1000),
-                temperature=kwargs.get("temperature", 0.7),
-                **kwargs
+                max_tokens=max_tokens,
+                temperature=temperature,
+                **api_kwargs
             )
 
             response_time = time.time() - start_time
