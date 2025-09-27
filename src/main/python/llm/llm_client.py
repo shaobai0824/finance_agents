@@ -229,5 +229,9 @@ async def generate_llm_response(prompt: str, **kwargs) -> LLMResponse:
     return await llm_manager.generate_response(prompt, **kwargs)
 
 def is_llm_configured() -> bool:
-    """檢查是否已配置真實的 LLM"""
+    """檢查是否已配置 LLM（包括 Mock LLM）"""
+    return len(llm_manager.clients) > 0
+
+def is_real_llm_configured() -> bool:
+    """檢查是否已配置真實的 LLM（不包括 Mock）"""
     return llm_manager.is_real_llm_available()

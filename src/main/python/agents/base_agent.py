@@ -237,7 +237,7 @@ class BaseAgent(ABC):
     async def _generate_llm_response(self, prompt: str) -> str:
         """使用 LLM 生成回應"""
         if not is_llm_configured():
-            self.logger.warning("LLM not configured, using fallback response")
+            self.logger.warning("No LLM client available, using fallback response")
             return await self._generate_fallback_response(prompt)
 
         try:
