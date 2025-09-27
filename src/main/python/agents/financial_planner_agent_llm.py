@@ -8,12 +8,12 @@ FinancialPlannerAgent with LLM - 理財規劃專家 (使用真實 LLM)
 4. Never break userspace：穩定的理財建議格式
 """
 
-from typing import Dict, Any, List, Optional
-from datetime import datetime
 import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from .llm_base_agent import LLMBaseAgent
 from .base_agent import AgentType, MessageType
+from .llm_base_agent import LLMBaseAgent
 
 
 class FinancialPlannerAgentLLM(LLMBaseAgent):
@@ -69,6 +69,90 @@ class FinancialPlannerAgentLLM(LLMBaseAgent):
                 "description": "追求高報酬，能承受較大波動"
             }
         }
+
+    def _get_system_prompt(self) -> str:
+        """理財規劃專家的系統提示詞"""
+        return """你是專業的認證理財規劃師 (CFP)，專精於為個人和家庭提供全面的財務規劃建議。
+
+# 專業領域
+- 個人投資組合規劃與資產配置
+- 退休規劃與養老金準備
+- 風險管理與保險規劃
+- 儲蓄策略與緊急基金建立
+- 稅務優化與節稅規劃
+- 遺產規劃與財富傳承
+
+# 服務特色
+1. **個人化建議**: 根據客戶年齡、收入、風險承受度提供客製化方案
+2. **全面規劃**: 涵蓋短中長期的財務目標規劃
+3. **實務導向**: 提供具體可執行的理財步驟
+4. **風險控管**: 重視風險分散與保障規劃
+
+# 回應原則
+1. **以客戶需求為中心**: 深入了解客戶財務狀況和目標
+2. **分階段建議**: 提供循序漸進的理財執行步驟
+3. **風險評估**: 充分評估並說明各種投資風險
+4. **定期檢視**: 建議定期檢視和調整理財計劃
+
+# 回應格式
+🎯 **理財目標分析**
+- 短期目標（1年內）
+- 中期目標（1-5年）
+- 長期目標（5年以上）
+
+📊 **風險評估與資產配置**
+- 風險承受度分析
+- 建議資產配置比例
+- 適合的投資工具
+
+💰 **具體執行建議**
+- 優先執行順序
+- 每月預算分配
+- 投資標的推薦
+
+📅 **定期檢視機制**
+- 檢視頻率建議
+- 調整時機說明
+
+⚠️ **風險提醒**
+投資有風險，建議充分了解商品特性後再進行投資決策。
+
+注意：我會結合檢索到的相關知識來提供更專業和準確的建議。"""
+
+    async def can_handle(self, query: str) -> float:
+        """評估是否能處理理財規劃相關查詢"""
+        query_lower = query.lower()
+
+        # 計算理財規劃關鍵字匹配度
+        planning_keywords = [
+            "投資建議", "理財規劃", "資產配置", "風險評估", "退休規劃",
+            "保險", "儲蓄", "個人財務", "投資組合", "資金分配",
+            "investment", "portfolio", "savings", "retirement", "insurance",
+            "理財", "財務規劃", "投資", "配置", "風險", "退休", "保險",
+            "儲蓄", "資產", "組合", "規劃", "建議", "理財建議"
+        ]
+
+        keyword_count = sum(1 for keyword in planning_keywords if keyword in query_lower)
+        keyword_score = min(keyword_count / 5, 1.0) * 0.6
+
+        # 個人化詞彙加分
+        personal_terms = ["我", "我的", "個人", "家庭", "年收入", "歲"]
+        personal_count = sum(1 for term in personal_terms if term in query)
+        personal_score = min(personal_count / 3, 1.0) * 0.3
+
+        # 財務相關詞彙
+        financial_terms = ["錢", "資金", "預算", "收入", "支出", "負債"]
+        financial_count = sum(1 for term in financial_terms if term in query)
+        financial_score = min(financial_count / 2, 1.0) * 0.1
+
+        final_score = keyword_score + personal_score + financial_score
+
+        self.logger.debug(
+            f"理財規劃專家能力評分: {final_score:.2f} "
+            f"(關鍵字: {keyword_score:.2f}, 個人化: {personal_score:.2f}, 財務: {financial_score:.2f})"
+        )
+
+        return min(final_score, 1.0)
 
     async def _build_prompt(self,
                           query: str,

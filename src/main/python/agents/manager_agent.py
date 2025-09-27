@@ -31,7 +31,7 @@ class ManagerAgent(LLMBaseAgent):
     """
 
     def __init__(self):
-        super().__init__(AgentType.MANAGER, "FinanceManager")
+        super().__init__(AgentType.MANAGER, "FinanceManager", use_rag=False)
 
         # 關鍵字映射：查詢內容 -> 需要的專家
         # Linus 哲學：好品味的資料結構，避免複雜的 if/else
@@ -61,6 +61,51 @@ class ManagerAgent(LLMBaseAgent):
                 "confidence_boost": 0.3
             }
         }
+
+    def _get_system_prompt(self) -> str:
+        """管理員的系統提示詞"""
+        return """你是智能路由管理人，負責分析使用者查詢並決定需要哪些專家參與。
+
+# 職責
+- 分析使用者查詢內容和意圖
+- 決定需要哪些專業領域的專家
+- 協調多個代理人的工作流程
+- 不處理具體的理財問題，只負責路由決策
+
+# 專家類型
+- financial_planner: 理財規劃專家 - 個人理財、投資建議、資產配置
+- financial_analyst: 金融分析專家 - 市場分析、股票分析、技術分析
+- legal_expert: 法律專家 - 法規合規、稅務問題、法律風險
+
+# 路由原則
+1. 基於關鍵字匹配決定專家參與
+2. 可以同時調用多個專家
+3. 如果查詢不明確，默認使用理財規劃專家
+4. 確保每個查詢都有適當的專家處理"""
+
+    async def _build_prompt(self, query: str, knowledge_results: List[Dict], personal_context: Dict[str, Any]) -> str:
+        """構建路由分析提示詞"""
+        prompt = f"""作為智能路由管理人，請分析以下查詢並決定需要哪些專家參與：
+
+查詢內容：{query}
+
+可用專家：
+1. financial_planner - 理財規劃專家（個人理財、投資建議、資產配置）
+2. financial_analyst - 金融分析專家（市場分析、股票分析、技術分析）
+3. legal_expert - 法律專家（法規合規、稅務問題、法律風險）
+
+請分析查詢內容，決定需要哪些專家參與，並說明原因。"""
+
+        return prompt
+
+    async def _generate_fallback_response(self, prompt: str) -> str:
+        """LLM 不可用時的降級回應"""
+        return """路由分析完成，基於查詢內容，建議調用以下專家：
+- 理財規劃專家：處理投資建議和資產配置
+- 金融分析專家：提供市場和股票分析
+- 法律專家：處理稅務和法規問題
+
+這是基於關鍵字匹配的標準路由建議。"""
 
     async def process_message(self, message: AgentMessage) -> AgentMessage:
         """處理路由決策請求"""

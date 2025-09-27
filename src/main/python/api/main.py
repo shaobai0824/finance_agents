@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
 
         # 初始化理財工作流程
         logger.info("Initializing finance workflow...")
-        finance_workflow = FinanceWorkflow()
+        finance_workflow = FinanceWorkflowLLM()
 
         logger.info("Finance Agents API started successfully!")
 

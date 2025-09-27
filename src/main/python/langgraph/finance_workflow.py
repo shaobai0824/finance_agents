@@ -17,11 +17,11 @@ from typing import Any, Dict, List, Optional
 from langgraph.graph import END, START, StateGraph
 
 from ..agents import ManagerAgent
-from ..agents.financial_planner_agent_new import FinancialPlannerAgent
-from ..agents.financial_analyst_agent import FinancialAnalystAgent
-from ..agents.legal_expert_agent import LegalExpertAgent
 from ..agents.base_agent import AgentMessage, AgentType, MessageType
-from ..rag import KnowledgeRetriever, ChromaVectorStore
+from ..agents.financial_analyst_agent_llm import FinancialAnalystAgentLLM
+from ..agents.financial_planner_agent_llm import FinancialPlannerAgentLLM
+from ..agents.legal_expert_agent_llm import LegalExpertAgentLLM
+from ..rag import ChromaVectorStore, KnowledgeRetriever
 from .state_manager import FinanceState, StateManager, WorkflowStatus
 
 logger = logging.getLogger(__name__)

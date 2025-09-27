@@ -8,12 +8,12 @@ LegalExpertAgent with LLM - 法律專家 (使用真實 LLM)
 4. Never break userspace：一致的法律意見格式
 """
 
-from typing import Dict, Any, List, Optional
-from datetime import datetime
 import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from .llm_base_agent import LLMBaseAgent
 from .base_agent import AgentType, MessageType
+from .llm_base_agent import LLMBaseAgent
 
 
 class LegalExpertAgentLLM(LLMBaseAgent):
@@ -55,6 +55,79 @@ class LegalExpertAgentLLM(LLMBaseAgent):
             "risk_warnings": "風險警語",
             "licensing_requirements": "執照要求"
         }
+
+    def _get_system_prompt(self) -> str:
+        """法律專家的系統提示詞"""
+        return """你是專業的台灣法律合規專家，專精於金融相關法規。
+
+# 專業領域
+- 台灣稅務法規 (所得稅法、營業稅法、遺產及贈與稅法)
+- 金融投資法規 (證券交易法、銀行法、保險法、投信投顧法)
+- 金融消費者保護相關法規
+- 洗錢防制與法令遵循
+
+# 回應準則
+1. **準確性第一**: 基於現行台灣法規提供建議
+2. **風險警示**: 明確指出法律風險和注意事項
+3. **實務導向**: 提供具體可行的合規建議
+4. **免責聲明**: 提醒使用者需諮詢專業律師或會計師
+
+# 回應格式
+📋 **法規分析**
+- 相關法條或規定
+- 適用情境說明
+
+⚠️ **風險提醒**
+- 潛在法律風險
+- 違法後果說明
+
+💡 **合規建議**
+- 具體執行建議
+- 注意事項提醒
+
+⚖️ **免責聲明**
+本建議僅供參考，實際執行前請諮詢專業律師或會計師。
+
+# 限制
+- 不提供具體個案法律意見
+- 不替代專業法律諮詢
+- 僅就一般性法規問題提供說明"""
+
+    async def can_handle(self, query: str) -> float:
+        """評估是否能處理法律相關查詢"""
+        query_lower = query.lower()
+
+        # 計算法律關鍵字匹配度
+        legal_keywords = [
+            "法規", "合規", "稅務", "法律", "規範", "條文", "監管",
+            "金融法", "投資法規", "稅務規劃", "法律風險",
+            "legal", "regulation", "compliance", "tax", "law",
+            "所得稅", "營業稅", "遺產稅", "贈與稅", "稅務", "報稅", "扣繳", "綜所稅",
+            "證券交易法", "投信投顧法", "銀行法", "保險法", "洗錢防制法",
+            "金融消費者保護法", "存款保險條例", "信託法", "票據法",
+            "公司法", "商業會計法", "勞基法", "個人資料保護法"
+        ]
+
+        keyword_count = sum(1 for keyword in legal_keywords if keyword in query_lower)
+        keyword_score = min(keyword_count / 5, 1.0) * 0.6
+
+        # 檢查是否包含法律相關詞彙
+        legal_terms = [
+            "法規", "法律", "稅", "稅務", "法條", "合法", "違法", "規定", "條例",
+            "申報", "扣繳", "免稅", "課稅", "罰款", "處罰", "合規", "風險"
+        ]
+
+        legal_term_count = sum(1 for term in legal_terms if term in query)
+        legal_term_score = min(legal_term_count / 3, 1.0) * 0.4
+
+        final_score = keyword_score + legal_term_score
+
+        self.logger.debug(
+            f"法律專家能力評分: {final_score:.2f} "
+            f"(關鍵字: {keyword_score:.2f}, 法律詞彙: {legal_term_score:.2f})"
+        )
+
+        return final_score
 
     async def _build_prompt(self,
                           query: str,

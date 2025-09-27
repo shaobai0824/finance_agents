@@ -8,14 +8,24 @@ FinancialAnalystAgent with Real LLM Integration - 金融分析專家 (真實 LLM
 4. Never break userspace：一致的分析報告格式
 """
 
-from typing import Dict, Any, List, Optional
-from datetime import datetime
-import re
 import logging
+import re
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from .base_agent import BaseAgent, AgentMessage, AgentType, MessageType
+from .base_agent import AgentMessage, AgentType, BaseAgent, MessageType
 from .llm_base_agent import LLMBaseAgent
-from ..llm import generate_llm_response, is_llm_configured
+
+try:
+    from ..llm import generate_llm_response, is_llm_configured
+except ImportError:
+    try:
+        from llm import generate_llm_response, is_llm_configured
+    except ImportError:
+        async def generate_llm_response(prompt, **kwargs):
+            return type('MockResponse', (), {'content': '模擬回應', 'model': 'mock'})()
+        def is_llm_configured():
+            return False
 
 
 class FinancialAnalystAgentLLM(LLMBaseAgent):
@@ -51,118 +61,20 @@ class FinancialAnalystAgentLLM(LLMBaseAgent):
             "sector_analysis": "產業分析"
         }
 
-    async def process_message(self, message: AgentMessage) -> AgentMessage:
-        """處理訊息並生成專業金融分析"""
-        try:
-            query = message.content.strip()
+    async def _build_prompt(self,
+                          query: str,
+                          knowledge_results: List[Dict],
+                          personal_context: Dict[str, Any]) -> str:
+        """構建金融分析專業提示詞"""
 
-            # 1. RAG 檢索相關市場資訊
-            knowledge_results = await self._retrieve_knowledge(query, max_results=8)
-            knowledge_context = self._format_knowledge_context(knowledge_results)
-
-            # 2. 分析查詢類型
-            analysis_domain = self._classify_analysis_domain(query)
-
-            # 3. 使用 LLM 生成專業分析
-            analysis_report = await self._generate_llm_analysis(
-                query, analysis_domain, knowledge_context
-            )
-
-            # 4. 計算信心度
-            confidence = self._calculate_confidence(query, knowledge_results)
-
-            # 5. 建立回應
-            response = self.create_response(
-                content=analysis_report,
-                metadata={
-                    "analysis_domain": analysis_domain,
-                    "knowledge_used": len(knowledge_results),
-                    "analysis_time": datetime.now().isoformat(),
-                    "agent_type": "financial_analyst_llm",
-                    "llm_configured": is_llm_configured()
-                },
-                sources=self._extract_sources(knowledge_results),
-                confidence=confidence
-            )
-
-            self.log_interaction(message, response)
-            return response
-
-        except Exception as e:
-            self.logger.error(f"Error processing message: {e}")
-            return self.create_error_response(
-                f"分析過程中發生錯誤：{str(e)}",
-                metadata={"error_type": "processing_error"}
-            )
-
-    def _classify_analysis_domain(self, query: str) -> str:
-        """分類分析領域"""
-        query_lower = query.lower()
-
-        # 技術分析關鍵字
-        if any(keyword in query_lower for keyword in
-               ["技術分析", "k線", "移動平均", "macd", "rsi", "支撐", "壓力", "趨勢"]):
-            return "technical_analysis"
-
-        # 基本面分析關鍵字
-        elif any(keyword in query_lower for keyword in
-                 ["基本面", "財報", "本益比", "roe", "營收", "獲利", "財務"]):
-            return "fundamental_analysis"
-
-        # 風險評估關鍵字
-        elif any(keyword in query_lower for keyword in
-                 ["風險", "波動", "風險評估", "投資風險"]):
-            return "risk_assessment"
-
-        # 產業分析關鍵字
-        elif any(keyword in query_lower for keyword in
-                 ["產業", "類股", "板塊", "sector", "行業"]):
-            return "sector_analysis"
-
-        # 預設為市場分析
-        else:
-            return "market_analysis"
-
-    async def _generate_llm_analysis(self,
-                                   query: str,
-                                   analysis_domain: str,
-                                   knowledge_context: str) -> str:
-        """使用 LLM 生成專業金融分析"""
-
-        # 如果沒有配置 LLM，使用預設模板
-        if not is_llm_configured():
-            return await self._generate_template_analysis(query, analysis_domain)
-
-        # 構建專業的提示詞
-        prompt = self._build_analysis_prompt(query, analysis_domain, knowledge_context)
-
-        try:
-            # 調用 LLM 生成分析
-            llm_response = await generate_llm_response(
-                prompt,
-                max_tokens=1200,
-                temperature=0.3  # 較低溫度確保專業性
-            )
-
-            # 後處理：確保包含必要的風險警語
-            analysis = self._post_process_analysis(llm_response.content)
-
-            return analysis
-
-        except Exception as e:
-            self.logger.error(f"LLM generation failed: {e}")
-            # 降級到模板回應
-            return await self._generate_template_analysis(query, analysis_domain)
-
-    def _build_analysis_prompt(self,
-                             query: str,
-                             analysis_domain: str,
-                             knowledge_context: str) -> str:
-        """構建專業的金融分析提示詞"""
-
+        # 分析查詢類型
+        analysis_domain = self._classify_analysis_domain(query)
         domain_name = self.analysis_domains.get(analysis_domain, "市場分析")
 
-        prompt = f"""你是一位專業的金融分析師，請根據以下資訊提供專業的{domain_name}：
+        # 格式化知識上下文
+        knowledge_context = self._format_knowledge_context(knowledge_results)
+
+        return f"""你是一位專業的金融分析師，請根據以下資訊提供專業的{domain_name}：
 
 用戶查詢：{query}
 
@@ -199,13 +111,9 @@ class FinancialAnalystAgentLLM(LLMBaseAgent):
 5. 格式要清晰易讀，使用適當的 Markdown 標記
 """
 
-        return prompt
-
-    async def _generate_template_analysis(self, query: str, analysis_domain: str) -> str:
-        """生成模板分析（LLM 不可用時的降級方案）"""
-        domain_name = self.analysis_domains.get(analysis_domain, "市場分析")
-
-        return f"""📈 **{domain_name}報告**
+    async def _generate_fallback_response(self, prompt: str) -> str:
+        """LLM 不可用時的金融分析降級回應"""
+        return """📈 **市場分析報告**
 
 📊 **當前市場狀況**
 - 基於最新市場資訊進行分析
@@ -230,52 +138,117 @@ class FinancialAnalystAgentLLM(LLMBaseAgent):
 *注意：此為預設分析模板，建議配置 LLM API 以獲得更詳細的個人化分析。*
 """
 
-    def _post_process_analysis(self, analysis: str) -> str:
-        """後處理分析內容，確保包含必要警語"""
+    def _get_system_prompt(self) -> str:
+        """金融分析專家的系統提示詞"""
+        return """你是專業的金融分析師，專精於股票、債券、基金等金融商品的深度分析研究。
 
-        # 確保包含風險警語
-        if "風險提醒" not in analysis and "投資風險" not in analysis:
-            analysis += "\n\n⚠️ **投資風險提醒**\n- 投資有風險，請謹慎評估個人財務狀況\n- 過往績效不代表未來表現\n- 建議分散投資，不要集中單一標的"
+# 專業領域
+- 技術分析：價格走勢、技術指標、交易訊號分析
+- 基本面分析：財務報表、公司估值、產業研究
+- 市場分析：總體經濟、政策影響、市場趨勢
+- 投資策略：選股邏輯、進出場時機、風險控制
 
-        # 確保包含免責聲明
-        if "本分析僅供參考" not in analysis:
-            analysis += "\n\n*本分析僅供參考，不構成投資建議。投資決策請自行判斷。*"
+# 分析框架
+1. **數據驅動**: 基於客觀數據和歷史資料進行分析
+2. **多角度分析**: 結合技術面、基本面、總體面觀點
+3. **風險評估**: 識別並量化投資風險
+4. **實務導向**: 提供可執行的投資建議
 
-        return analysis
+# 回應格式
+📈 **市場/個股分析**
+- 當前狀況評估
+- 關鍵技術/基本面指標
+- 趨勢判斷與預測
 
-    def _format_knowledge_context(self, knowledge_results: List[Dict]) -> str:
-        """格式化知識檢索結果為上下文"""
-        if not knowledge_results:
-            return "暫無相關市場資訊"
+📊 **數據解讀**
+- 重要財務/技術指標說明
+- 同業或歷史比較
+- 異常狀況分析
 
-        context_parts = []
-        for i, result in enumerate(knowledge_results[:6], 1):
-            title = result.get('metadata', {}).get('title', f'市場資訊 {i}')
-            content = result.get('content', '')[:300]  # 限制長度
-            context_parts.append(f"{i}. {title}: {content}")
+💡 **投資建議**
+- 進出場時機建議
+- 目標價位設定
+- 停損停利策略
 
-        return "\n".join(context_parts)
+⚠️ **風險警示**
+- 主要風險因子識別
+- 市場不確定性提醒
+- 建議風險控制措施
 
-    def _calculate_confidence(self, query: str, knowledge_results: List[Dict]) -> float:
-        """計算分析信心度"""
-        base_confidence = 0.7
+🔍 **後續觀察重點**
+- 需關注的關鍵指標
+- 重要時間節點提醒
 
-        # 根據檢索結果數量調整
-        if len(knowledge_results) >= 5:
-            base_confidence += 0.1
-        elif len(knowledge_results) >= 3:
-            base_confidence += 0.05
+注意：分析基於現有資料，市場具不確定性，投資前請審慎評估。
 
-        # 根據查詢明確度調整
-        if len(query) > 10 and any(keyword in query for keyword in
-                                 ["分析", "建議", "投資", "股票", "基金"]):
-            base_confidence += 0.05
+我會結合檢索到的最新市場資訊和歷史數據來提供專業分析。"""
 
-        # 如果使用真實 LLM，提高信心度
-        if is_llm_configured():
-            base_confidence += 0.1
+    async def can_handle(self, query: str) -> float:
+        """評估是否能處理金融分析相關查詢"""
+        query_lower = query.lower()
 
-        return min(base_confidence, 0.95)  # 最高 95%
+        # 計算金融分析關鍵字匹配度
+        analysis_keywords = [
+            "技術分析", "基本面分析", "市場分析", "股票分析", "投資分析",
+            "財報分析", "產業分析", "趨勢分析", "K線", "移動平均", "RSI", "MACD",
+            "本益比", "ROE", "營收", "獲利", "股價淨值比", "技術指標",
+            "stock", "market", "analysis", "economic", "trend", "data",
+            "分析", "股票", "投資", "市場", "技術", "基本面", "財報",
+            "本益比", "趨勢", "指標", "價格", "評估"
+        ]
+
+        keyword_count = sum(1 for keyword in analysis_keywords if keyword in query_lower)
+        keyword_score = min(keyword_count / 6, 1.0) * 0.6
+
+        # 數據/指標相關詞彙加分
+        data_terms = ["數據", "指標", "比率", "報酬率", "績效", "走勢", "價格"]
+        data_count = sum(1 for term in data_terms if term in query)
+        data_score = min(data_count / 3, 1.0) * 0.3
+
+        # 具體性評分（是否提及具體股票、數據等）
+        specificity_indicators = ["股票代號", "公司名稱", "具體數字", "時間範圍"]
+        has_specific = any(
+            indicator in query for indicator in ["2330", "台積電", "%", "元", "年", "月"]
+        )
+        specificity_score = 0.1 if has_specific else 0
+
+        final_score = keyword_score + data_score + specificity_score
+
+        self.logger.debug(
+            f"金融分析專家能力評分: {final_score:.2f} "
+            f"(關鍵字: {keyword_score:.2f}, 數據導向: {data_score:.2f}, 具體性: {specificity_score:.2f})"
+        )
+
+        return min(final_score, 1.0)
+
+    def _classify_analysis_domain(self, query: str) -> str:
+        """分類分析領域"""
+        query_lower = query.lower()
+
+        # 技術分析關鍵字
+        if any(keyword in query_lower for keyword in
+               ["技術分析", "k線", "移動平均", "macd", "rsi", "支撐", "壓力", "趨勢"]):
+            return "technical_analysis"
+
+        # 基本面分析關鍵字
+        elif any(keyword in query_lower for keyword in
+                 ["基本面", "財報", "本益比", "roe", "營收", "獲利", "財務"]):
+            return "fundamental_analysis"
+
+        # 風險評估關鍵字
+        elif any(keyword in query_lower for keyword in
+                 ["風險", "波動", "風險評估", "投資風險"]):
+            return "risk_assessment"
+
+        # 產業分析關鍵字
+        elif any(keyword in query_lower for keyword in
+                 ["產業", "類股", "板塊", "sector", "行業"]):
+            return "sector_analysis"
+
+        # 預設為市場分析
+        else:
+            return "market_analysis"
+
 
     def get_analysis_capabilities(self) -> Dict[str, Any]:
         """取得分析能力描述"""
