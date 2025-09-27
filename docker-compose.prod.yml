@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  finance-api:
+    build: .
+    container_name: finance-agents-api-prod
+    ports:
+      - "80:8000"
+    environment:
+      - LOG_LEVEL=WARNING
+      - CHROMA_DB_PATH=/app/chroma_db
+      - PYTHONPATH=/app/src/main/python
+      - API_DEBUG=false
+    volumes:
+      - ./chroma_db:/app/chroma_db
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+  nginx:
+    image: nginx:alpine
+    container_name: finance-nginx
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - finance-api
+    restart: always
+
+  postgres:
+    image: postgres:15
+    container_name: finance-postgres-prod
+    environment:
+      POSTGRES_DB: finance_db
+      POSTGRES_USER: finance_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  redis:
+    image: redis:7-alpine
+    container_name: finance-redis-prod
+    volumes:
+      - redis_data:/data
+    restart: always
+    command: redis-server --appendonly yes
+
+volumes:
+  postgres_data:
+  redis_data:

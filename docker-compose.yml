@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  finance-api:
+    build: .
+    container_name: finance-agents-api
+    ports:
+      - "8000:8000"
+    environment:
+      - LOG_LEVEL=INFO
+      - CHROMA_DB_PATH=/app/chroma_db
+      - PYTHONPATH=/app/src/main/python
+    volumes:
+      - ./chroma_db:/app/chroma_db
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 未來可添加的服務
+  # postgres:
+  #   image: postgres:15
+  #   container_name: finance-postgres
+  #   environment:
+  #     POSTGRES_DB: finance_db
+  #     POSTGRES_USER: finance_user
+  #     POSTGRES_PASSWORD: finance_password
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: finance-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:

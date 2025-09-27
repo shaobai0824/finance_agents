@@ -1,0 +1,385 @@
+"""
+FastAPI 主應用程式
+
+實作 Linus 哲學：
+1. 簡潔執念：清晰的 API 結構，避免過度複雜
+2. Never break userspace：穩定的 API 端點，向後兼容
+3. 實用主義：專注解決實際的理財諮詢需求
+4. 好品味：統一的錯誤處理和回應格式
+"""
+
+import asyncio
+import logging
+import time
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any, Dict
+
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from ..langgraph.finance_workflow_llm import FinanceWorkflowLLM
+from ..rag import ChromaVectorStore, KnowledgeRetriever
+from .models import (ErrorResponse, HealthCheckResponse, QueryRequest,
+                     QueryResponse, SessionInfo, WorkflowStatus)
+
+# 設定日誌
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 全域變數（在生產環境中應該使用依賴注入）
+finance_workflow = None
+vector_store = None
+knowledge_retriever = None
+active_sessions: Dict[str, Dict[str, Any]] = {}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """應用程式生命週期管理
+    
+    Linus 哲學：簡潔的初始化
+    - 明確的初始化順序
+    - 容錯處理
+    """
+    global finance_workflow, vector_store, knowledge_retriever
+    
+    # 啟動事件
+    try:
+        logger.info("Starting Finance Agents API...")
+
+        # 初始化 ChromaDB 向量存儲
+        logger.info("Initializing ChromaDB vector store...")
+        vector_store = ChromaVectorStore()
+
+        # 初始化知識檢索器
+        logger.info("Initializing knowledge retriever...")
+        knowledge_retriever = KnowledgeRetriever(vector_store)
+
+        # 初始化理財工作流程
+        logger.info("Initializing finance workflow...")
+        finance_workflow = FinanceWorkflow()
+
+        logger.info("Finance Agents API started successfully!")
+
+    except Exception as e:
+        logger.error(f"Failed to start application: {e}")
+        raise
+    
+    yield
+    
+    # 關閉事件
+    logger.info("Shutting down Finance Agents API...")
+
+
+# 建立 FastAPI 應用
+app = FastAPI(
+    title="Finance Agents API",
+    description="多代理人理財諮詢服務 API - 基於 LangGraph + OpenAI + ChromaDB",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan
+)
+
+# CORS 設定
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 全域變數（在生產環境中應該使用依賴注入）
+active_sessions: Dict[str, Dict[str, Any]] = {}
+
+
+# 錯誤處理
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    """HTTP 例外處理器"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=ErrorResponse(
+            error_code=f"HTTP_{exc.status_code}",
+            error_message=str(exc.detail),
+            details={"path": str(request.url)}
+        ).dict()
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    """一般例外處理器"""
+    logger.error(f"Unhandled exception: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content=ErrorResponse(
+            error_code="INTERNAL_SERVER_ERROR",
+            error_message="內部伺服器錯誤",
+            details={"path": str(request.url)}
+        ).dict()
+    )
+
+
+# API 路由
+@app.get("/", response_model=Dict[str, str])
+async def root():
+    """根端點"""
+    return {
+        "service": "Finance Agents API",
+        "version": "1.0.0",
+        "description": "多代理人理財諮詢服務",
+        "docs": "/docs"
+    }
+
+
+@app.get("/health", response_model=HealthCheckResponse)
+async def health_check():
+    """健康檢查端點
+
+    Linus 哲學：實用主義
+    - 檢查所有關鍵服務的狀態
+    - 提供足夠的資訊用於監控
+    """
+    try:
+        services = {}
+
+        # 檢查向量存儲狀態
+        try:
+            if vector_store:
+                collection_info = vector_store.get_collection_info()
+                services["vector_store"] = "healthy"
+            else:
+                services["vector_store"] = "not_initialized"
+        except Exception as e:
+            services["vector_store"] = f"error: {str(e)}"
+
+        # 檢查知識檢索器狀態
+        try:
+            if knowledge_retriever:
+                services["knowledge_retriever"] = "healthy"
+            else:
+                services["knowledge_retriever"] = "not_initialized"
+        except Exception as e:
+            services["knowledge_retriever"] = f"error: {str(e)}"
+
+        # 檢查工作流程狀態
+        try:
+            if finance_workflow:
+                services["workflow"] = "healthy"
+            else:
+                services["workflow"] = "not_initialized"
+        except Exception as e:
+            services["workflow"] = f"error: {str(e)}"
+
+        # 判斷整體狀態
+        overall_status = "healthy" if all(
+            status == "healthy" for status in services.values()
+        ) else "degraded"
+
+        return HealthCheckResponse(
+            status=overall_status,
+            version="1.0.0",
+            services=services
+        )
+
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return HealthCheckResponse(
+            status="unhealthy",
+            version="1.0.0",
+            services={"error": str(e)}
+        )
+
+
+@app.post("/query", response_model=QueryResponse)
+async def process_query(request: QueryRequest):
+    """處理理財諮詢查詢
+
+    Linus 哲學：好品味的 API 設計
+    - 清晰的輸入驗證
+    - 結構化的錯誤處理
+    - 完整的回應資訊
+    """
+    start_time = time.time()
+    session_id = request.session_id or str(uuid.uuid4())
+
+    try:
+        logger.info(f"Processing query for session: {session_id}")
+
+        # 檢查服務是否就緒
+        if not finance_workflow:
+            raise HTTPException(
+                status_code=503,
+                detail="理財諮詢服務尚未就緒，請稍後再試"
+            )
+
+        # 更新會話資訊
+        active_sessions[session_id] = {
+            "created_at": datetime.now(),
+            "last_activity": datetime.now(),
+            "query_count": active_sessions.get(session_id, {}).get("query_count", 0) + 1,
+            "status": "processing"
+        }
+
+        # 執行理財諮詢工作流程
+        workflow_result = await finance_workflow.run(
+            user_query=request.query,
+            user_profile=request.user_profile,
+            session_id=session_id
+        )
+
+        # 更新會話狀態
+        active_sessions[session_id]["status"] = "completed"
+        active_sessions[session_id]["last_activity"] = datetime.now()
+
+        # 轉換專家回應格式
+        expert_responses = []
+        for expert_type, response_data in workflow_result["expert_responses"].items():
+            expert_responses.append({
+                "expert_type": expert_type,
+                "content": response_data["content"],
+                "confidence": response_data["confidence"],
+                "sources": workflow_result["expert_sources"].get(expert_type, []),
+                "metadata": response_data["metadata"]
+            })
+
+        # 計算處理時間
+        processing_time = time.time() - start_time
+
+        # 建立回應
+        response = QueryResponse(
+            session_id=session_id,
+            query=request.query,
+            final_response=workflow_result["final_response"] or "無法生成回應",
+            confidence_score=workflow_result["confidence_score"] or 0.0,
+            expert_responses=expert_responses,
+            sources=workflow_result["response_sources"] or [],
+            processing_time=processing_time,
+            status=workflow_result["status"]
+        )
+
+        logger.info(f"Query processed successfully in {processing_time:.2f}s")
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Query processing failed: {e}")
+
+        # 更新會話狀態
+        if session_id in active_sessions:
+            active_sessions[session_id]["status"] = "failed"
+            active_sessions[session_id]["last_activity"] = datetime.now()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"查詢處理失敗：{str(e)}"
+        )
+
+
+@app.get("/session/{session_id}/status", response_model=WorkflowStatus)
+async def get_session_status(session_id: str):
+    """取得會話狀態
+
+    支援 HITL (Human-in-the-Loop) 機制的長時間處理查詢
+    """
+    if session_id not in active_sessions:
+        raise HTTPException(
+            status_code=404,
+            detail="找不到指定的會話"
+        )
+
+    session_data = active_sessions[session_id]
+
+    return WorkflowStatus(
+        session_id=session_id,
+        status=session_data.get("status", "unknown"),
+        current_step=session_data.get("current_step", "completed"),
+        progress=1.0 if session_data.get("status") == "completed" else 0.5,
+        estimated_completion=None,
+        error_messages=session_data.get("error_messages", [])
+    )
+
+
+@app.get("/session/{session_id}/info", response_model=SessionInfo)
+async def get_session_info(session_id: str):
+    """取得會話詳細資訊"""
+    if session_id not in active_sessions:
+        raise HTTPException(
+            status_code=404,
+            detail="找不到指定的會話"
+        )
+
+    session_data = active_sessions[session_id]
+
+    return SessionInfo(
+        session_id=session_id,
+        created_at=session_data["created_at"],
+        last_activity=session_data["last_activity"],
+        query_count=session_data["query_count"],
+        status=session_data["status"]
+    )
+
+
+@app.delete("/session/{session_id}")
+async def delete_session(session_id: str):
+    """刪除會話資料"""
+    if session_id in active_sessions:
+        del active_sessions[session_id]
+        return {"message": f"會話 {session_id} 已刪除"}
+    else:
+        raise HTTPException(
+            status_code=404,
+            detail="找不到指定的會話"
+        )
+
+
+@app.get("/stats")
+async def get_system_stats():
+    """取得系統統計資訊"""
+    try:
+        stats = {
+            "active_sessions": len(active_sessions),
+            "total_queries": sum(
+                session.get("query_count", 0)
+                for session in active_sessions.values()
+            ),
+            "system_status": "operational"
+        }
+
+        # 添加向量存儲統計
+        if vector_store:
+            collection_info = vector_store.get_collection_info()
+            stats["vector_store"] = {
+                "document_count": collection_info.get("document_count", 0),
+                "collection_name": collection_info.get("name")
+            }
+
+        # 添加檢索器統計
+        if knowledge_retriever:
+            retriever_stats = knowledge_retriever.get_retriever_stats()
+            stats["knowledge_retriever"] = retriever_stats
+
+        return stats
+
+    except Exception as e:
+        logger.error(f"Failed to get system stats: {e}")
+        return {"error": str(e)}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # 開發模式啟動
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

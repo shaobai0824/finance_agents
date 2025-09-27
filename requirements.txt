@@ -16,7 +16,6 @@ python-multipart>=0.0.6
 
 # Database
 sqlalchemy>=2.0.0
-sqlite3
 
 # Data processing
 pandas>=2.0.0
@@ -44,5 +43,4 @@ passlib[bcrypt]>=1.7.4
 loguru>=0.7.0
 
 # Async support
-asyncio
 aiofiles>=23.0.0

@@ -1,0 +1,154 @@
+# Finance Agents ETL 自動化設定檔
+#
+# 實作 Linus 哲學：
+# - 簡潔執念：清晰的設定結構
+# - 實用主義：專注實際需求
+# - 好品味：統一的設定格式
+
+# 全域設定
+global_settings:
+  chunk_size: 500                    # 文檔分塊大小
+  chunk_overlap: 50                  # 分塊重疊字數
+  batch_size: 10                     # 批次處理大小
+  max_articles_per_source: 30        # 每個來源最大文章數
+  request_delay: [2, 4]              # 請求延遲範圍（秒）
+  max_retries: 3                     # 最大重試次數
+  timeout: 30                        # 請求超時時間
+
+# 資料來源設定
+sources:
+
+  # 第一優先級：核心基石
+  - name: "全國法規資料庫"
+    module: "src.main.python.etl.scrapers.law_moj_scraper"
+    expert_domain: "legal_compliance"
+    target_collection: "legal_knowledge"
+    enabled: true
+    priority: 1
+    schedule: "0 3 * * 0"              # 每週日凌晨3點執行
+    config:
+      request_delay: [3, 5]            # 政府網站較慢，增加延遲
+      max_retries: 5
+      categories: ["金融法規", "稅務法規", "投資法規"]
+
+  - name: "鉅亨網-金融分析"
+    module: "src.main.python.etl.scrapers.cnyes_scraper"
+    expert_domain: "financial_analysis"
+    target_collection: "financial_news"
+    enabled: true
+    priority: 2
+    schedule: "0 6,14,22 * * *"        # 每日 6:00, 14:00, 22:00 執行
+    config:
+      selenium_browser: "chrome"
+      request_delay: [2, 4]
+      max_articles_per_source: 20
+      categories: ["台股", "美股", "全球股市", "外匯"]
+
+  - name: "鉅亨網-理財規劃"
+    module: "src.main.python.etl.scrapers.cnyes_scraper"
+    expert_domain: "financial_planning"
+    target_collection: "financial_planning"
+    enabled: true
+    priority: 2
+    schedule: "0 8,16 * * *"           # 每日 8:00, 16:00 執行
+    config:
+      selenium_browser: "chrome"
+      request_delay: [2, 4]
+      max_articles_per_source: 15
+      categories: ["基金", "理財", "保險", "房地產"]
+
+  # 第二優先級：即時動態（暫時停用，待實作）
+  - name: "公開資訊觀測站"
+    module: "src.main.python.etl.scrapers.mops_scraper"
+    expert_domain: "financial_analysis"
+    target_collection: "financial_reports"
+    enabled: false                     # 暫時停用（高技術難度）
+    priority: 1
+    schedule: "0 4 * * 1-5"           # 週一到週五凌晨4點
+    config:
+      selenium_browser: "chrome"
+      request_delay: [5, 8]            # 較高延遲避免反爬
+      max_retries: 5
+
+  - name: "金管會法規"
+    module: "src.main.python.etl.scrapers.fsc_scraper"
+    expert_domain: "legal_compliance"
+    target_collection: "regulatory_updates"
+    enabled: false                     # 待實作
+    priority: 2
+    schedule: "0 5 * * 1"             # 每週一凌晨5點
+    config:
+      request_delay: [3, 5]
+
+  # 第三優先級：深度觀點（暫時停用，待實作）
+  - name: "Mr. Market 市場先生"
+    module: "src.main.python.etl.scrapers.mrmarket_scraper"
+    expert_domain: "financial_planning"
+    target_collection: "financial_education"
+    enabled: false                     # 待實作
+    priority: 3
+    schedule: "0 7 * * 6"             # 每週六凌晨7點
+    config:
+      request_delay: [2, 4]
+      max_articles_per_source: 10
+
+# 資料庫設定
+database:
+  type: "chromadb"
+  persist_directory: "./chroma_db"
+  collection_prefix: "finance_agents"
+
+# 日誌設定
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./logs/etl.log"
+  max_size_mb: 50
+  backup_count: 5
+
+# 監控與通知設定
+monitoring:
+  enabled: true
+  success_threshold: 0.8              # 成功率閾值
+  notification:
+    enabled: false                     # 待實作通知功能
+    email:
+      smtp_server: ""
+      smtp_port: 587
+      username: ""
+      password: ""
+      recipients: []
+    slack:
+      webhook_url: ""
+
+# 效能設定
+performance:
+  concurrent_sources: 2               # 同時處理的資料來源數量
+  selenium_pool_size: 2               # Selenium 瀏覽器池大小
+  memory_limit_mb: 512               # 記憶體使用限制
+
+# 安全設定
+security:
+  user_agents:
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+
+  respect_robots_txt: true            # 遵守 robots.txt
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 30
+    burst_limit: 10
+
+# 資料清理設定
+data_cleaning:
+  remove_ads: true                    # 移除廣告內容
+  min_content_length: 100             # 最小內容長度
+  max_content_length: 10000           # 最大內容長度
+  filter_keywords:                    # 過濾關鍵字
+    - "廣告"
+    - "贊助"
+    - "業配"
+  duplicate_detection:
+    enabled: true
+    similarity_threshold: 0.9         # 重複檢測相似度閾值
