@@ -7,6 +7,14 @@ import os
 import sys
 from pathlib import Path
 
+# 載入環境變數
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    print("✅ 成功載入 .env 檔案")
+except ImportError:
+    print("⚠️ 無法導入 python-dotenv，請安裝: pip install python-dotenv")
+
 print("=== LLM 配置檢查 ===")
 print()
 

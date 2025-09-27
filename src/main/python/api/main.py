@@ -10,11 +10,16 @@ FastAPI 主應用程式
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict
+
+# 載入環境變數
+from dotenv import load_dotenv
+load_dotenv()
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
