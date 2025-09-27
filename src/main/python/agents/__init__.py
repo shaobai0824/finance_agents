@@ -9,7 +9,6 @@ Finance Agents - 多代理人理財服務系統 (LLM 驅動版本)
 """
 
 from .base_agent import BaseAgent
-from .llm_base_agent import LLMBaseAgent
 from .financial_analyst_agent_llm import FinancialAnalystAgentLLM
 from .financial_planner_agent_llm import FinancialPlannerAgentLLM
 from .legal_expert_agent_llm import LegalExpertAgentLLM
@@ -17,7 +16,6 @@ from .manager_agent import ManagerAgent
 
 __all__ = [
     "BaseAgent",
-    "LLMBaseAgent",
     "ManagerAgent",
     "FinancialPlannerAgentLLM",
     "FinancialAnalystAgentLLM",

@@ -12,11 +12,10 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from .base_agent import AgentType, MessageType
-from .llm_base_agent import LLMBaseAgent
+from .base_agent import AgentType, MessageType, BaseAgent
 
 
-class LegalExpertAgentLLM(LLMBaseAgent):
+class LegalExpertAgentLLM(BaseAgent):
     """法律專家代理人 (使用真實 LLM)
 
     特色：

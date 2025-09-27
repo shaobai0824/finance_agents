@@ -19,12 +19,11 @@ import re
 from typing import Any, Dict, List, Optional, Set
 
 from .base_agent import AgentMessage, AgentType, BaseAgent, MessageType
-from .llm_base_agent import LLMBaseAgent
 
 logger = logging.getLogger(__name__)
 
 
-class ManagerAgent(LLMBaseAgent):
+class ManagerAgent(BaseAgent):
     """智能路由管理人
 
     負責分析查詢並決定專家參與策略

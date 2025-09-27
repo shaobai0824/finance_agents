@@ -14,21 +14,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .base_agent import AgentMessage, AgentType, BaseAgent, MessageType
-from .llm_base_agent import LLMBaseAgent
-
-try:
-    from ..llm import generate_llm_response, is_llm_configured
-except ImportError:
-    try:
-        from llm import generate_llm_response, is_llm_configured
-    except ImportError:
-        async def generate_llm_response(prompt, **kwargs):
-            return type('MockResponse', (), {'content': '模擬回應', 'model': 'mock'})()
-        def is_llm_configured():
-            return False
 
 
-class FinancialAnalystAgentLLM(LLMBaseAgent):
+class FinancialAnalystAgentLLM(BaseAgent):
     """金融分析專家代理人 (使用真實 LLM)
 
     特色：
@@ -48,9 +36,7 @@ class FinancialAnalystAgentLLM(LLMBaseAgent):
 
         self.logger = logging.getLogger(__name__)
 
-        # 檢查 LLM 配置
-        if not is_llm_configured():
-            self.logger.warning("No LLM configured, falling back to template responses")
+        # LLM 配置檢查已整合到 BaseAgent 中
 
         # 分析專業領域
         self.analysis_domains = {
@@ -254,7 +240,7 @@ class FinancialAnalystAgentLLM(LLMBaseAgent):
         """取得分析能力描述"""
         return {
             "supported_domains": list(self.analysis_domains.values()),
-            "llm_configured": is_llm_configured(),
+            "llm_configured": self.get_llm_status()["llm_configured"],
             "features": [
                 "技術分析",
                 "基本面分析",
