@@ -7,11 +7,11 @@ LangGraph 工作流程模組
 - WorkflowExecutor: 工作流程執行器
 """
 
-from .finance_workflow import FinanceWorkflow
+from .finance_workflow_llm import FinanceWorkflowLLM
 from .state_manager import FinanceState, StateManager
 
 __all__ = [
-    "FinanceWorkflow",
+    "FinanceWorkflowLLM",
     "StateManager",
     "FinanceState"
 ]

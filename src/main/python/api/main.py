@@ -25,7 +25,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from ..langgraph.finance_workflow_llm import FinanceWorkflowLLM
+from ..workflow.finance_workflow_llm import FinanceWorkflowLLM
 from ..rag import ChromaVectorStore, KnowledgeRetriever
 from .models import (ErrorResponse, HealthCheckResponse, QueryRequest,
                      QueryResponse, SessionInfo, WorkflowStatus)
@@ -260,12 +260,12 @@ async def process_query(request: QueryRequest):
         response = QueryResponse(
             session_id=session_id,
             query=request.query,
-            final_response=workflow_result["final_response"] or "無法生成回應",
-            confidence_score=workflow_result["confidence_score"] or 0.0,
+            final_response=workflow_result.get("final_response", "無法生成回應"),
+            confidence_score=workflow_result.get("confidence_score", 0.0),
             expert_responses=expert_responses,
-            sources=workflow_result["response_sources"] or [],
+            sources=workflow_result.get("response_sources", []),
             processing_time=processing_time,
-            status=workflow_result["status"]
+            status=workflow_result.get("status", "failed")
         )
 
         logger.info(f"Query processed successfully in {processing_time:.2f}s")
