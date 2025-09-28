@@ -54,6 +54,7 @@ class MessageType(Enum):
     QUERY = "query"           # 使用者查詢
     RESPONSE = "response"     # 代理人回應
     ROUTE = "route"          # 路由決策
+    ROUTING = "routing"      # 路由處理中
     DATA = "data"            # 資料查詢結果
     ERROR = "error"          # 錯誤訊息
 

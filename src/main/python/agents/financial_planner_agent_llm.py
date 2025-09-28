@@ -310,7 +310,23 @@ class FinancialPlannerAgentLLM(BaseAgent):
 請提供具體的投資建議和風險評估。"""
 
             response_content = await self._generate_llm_response(prompt)
-            confidence = 0.85 if response_content else 0.6
+
+            # 根據內容長度和具體性動態計算信心度
+            if response_content:
+                # 基礎信心度
+                base_confidence = 0.6
+
+                # 根據回應長度調整（更詳細 = 更高信心度）
+                length_bonus = min(0.2, len(response_content) / 1000.0)
+
+                # 根據是否包含具體建議調整
+                specific_keywords = ["建議", "投資", "配置", "比例", "風險", "評估"]
+                specificity_bonus = sum(0.03 for keyword in specific_keywords if keyword in response_content)
+
+                confidence = min(0.95, base_confidence + length_bonus + specificity_bonus)
+            else:
+                confidence = 0.3
+
             sources = ["理財專家知識庫", "個人財務規劃準則", "投資組合理論"]
 
             return response_content, confidence, sources

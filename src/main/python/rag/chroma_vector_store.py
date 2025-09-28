@@ -304,3 +304,28 @@ class ChromaVectorStore:
         except Exception as e:
             logger.error(f"Failed to get all documents: {e}")
             raise
+
+    def similarity_search(self, query: str, k: int = 5, where: Optional[Dict[str, Any]] = None) -> List[str]:
+        """相似度搜尋（與 search 方法的簡化別名）
+
+        Args:
+            query: 查詢文字
+            k: 返回結果數量
+            where: 元資料過濾條件
+
+        Returns:
+            文檔內容清單（簡化格式）
+
+        Note:
+            這是為了與現有代碼相容而提供的別名方法
+        """
+        try:
+            results = self.search(query, n_results=k, where=where)
+            # 只返回文檔內容（簡化格式）
+            documents = [result["document"] for result in results]
+            logger.info(f"Similarity search found {len(documents)} results")
+            return documents
+
+        except Exception as e:
+            logger.error(f"Similarity search failed: {e}")
+            return []

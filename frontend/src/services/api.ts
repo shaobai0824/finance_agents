@@ -9,7 +9,7 @@ import {
 } from '../types';
 
 // API 基礎設定
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8002';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

@@ -86,7 +86,7 @@ class KnowledgeRetriever:
         query: str,
         expert_domain: ExpertDomain,
         max_results: int = 5,
-        similarity_threshold: float = 0.6
+        similarity_threshold: float = 0.3
     ) -> List[RetrievalResult]:
         """為特定專家檢索相關知識
 

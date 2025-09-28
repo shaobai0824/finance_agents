@@ -49,7 +49,7 @@ class FinanceWorkflowLLM:
 
         # 初始化共用 RAG 系統 (僅供金融和理財專家使用)
         try:
-            self.vector_store = ChromaVectorStore()
+            self.vector_store = ChromaVectorStore(collection_name="finance_knowledge_optimal")
             self.knowledge_retriever = KnowledgeRetriever(self.vector_store)
             logger.info("共用 RAG 系統初始化成功")
         except Exception as e:
@@ -201,12 +201,29 @@ class FinanceWorkflowLLM:
             # 使用管理代理人進行路由決策
             routing_message = AgentMessage(
                 agent_type=AgentType.MANAGER,
-                message_type=MessageType.ROUTING,
+                message_type=MessageType.QUERY,
                 content=query
             )
 
             routing_response = await self.manager_agent.process_message(routing_message)
-            required_experts = routing_response.metadata.get("required_experts", [AgentType.FINANCIAL_PLANNER])
+
+            # 安全獲取 metadata
+            if routing_response.metadata and "required_experts" in routing_response.metadata:
+                expert_names = routing_response.metadata["required_experts"]
+            else:
+                expert_names = ["financial_planner"]  # 默認值
+
+            # 轉換字符串為 AgentType 枚舉
+            required_experts = []
+            for name in expert_names:
+                if name == "financial_planner":
+                    required_experts.append(AgentType.FINANCIAL_PLANNER)
+                elif name == "financial_analyst":
+                    required_experts.append(AgentType.FINANCIAL_ANALYST)
+                elif name == "legal_expert":
+                    required_experts.append(AgentType.LEGAL_EXPERT)
+                else:
+                    required_experts.append(AgentType.FINANCIAL_PLANNER)  # 默認
 
             logger.info(f"Routing complete. Required experts: {[exp.value for exp in required_experts]}")
 

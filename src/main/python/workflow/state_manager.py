@@ -262,6 +262,23 @@ class StateManager:
         }
         state["execution_log"].append(log_entry)
 
+    def update_session_state(self, session_id: str, state: FinanceState) -> None:
+        """更新會話狀態（用於持久化存儲）
+
+        Linus 哲學：簡潔的狀態管理
+        - 當前為內存存儲，未來可擴展為資料庫
+        - 統一的狀態更新介面
+        """
+        # 記錄狀態更新日誌
+        self.logger.info(f"Session {session_id} state updated: status={state['status']}")
+
+        # 在實際生產環境中，這裡可以：
+        # 1. 存儲到資料庫
+        # 2. 發送狀態更新事件
+        # 3. 更新緩存
+        # 目前僅記錄日誌
+        pass
+
     def get_state_summary(self, state: FinanceState) -> Dict[str, Any]:
         """取得狀態摘要（用於監控和除錯）"""
         return {

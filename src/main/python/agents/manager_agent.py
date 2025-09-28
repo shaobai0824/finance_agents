@@ -54,7 +54,8 @@ class ManagerAgent(BaseAgent):
             AgentType.LEGAL_EXPERT: {
                 "keywords": [
                     "法規", "合規", "稅務", "法律", "規範", "條文", "監管",
-                    "金融法", "投資法規", "稅務規劃", "法律風險",
+                    "金融法", "投資法規", "稅務規劃", "法律風險", "法律問題",
+                    "合規問題", "稅法", "法律諮詢", "合規性", "法規遵循",
                     "legal", "regulation", "compliance", "tax", "law"
                 ],
                 "confidence_boost": 0.3
@@ -166,13 +167,23 @@ class ManagerAgent(BaseAgent):
         """
         required_experts = set()
 
+        # 對每個專家類型計算匹配分數
+        scores = {}
         for expert_type, config in self.expert_keywords.items():
             # 計算關鍵字匹配度
             matches = sum(1 for keyword in config["keywords"] if keyword in query)
             match_ratio = matches / len(config["keywords"])
 
-            # 如果匹配度超過閾值，添加到需要的專家列表
-            if match_ratio > 0.1 or matches >= 2:  # 靈活的閾值策略
+            # 計算總分數（匹配數量 + 匹配比例）
+            score = matches + match_ratio
+            scores[expert_type] = score
+
+            # 法律專家的特殊處理：只要有一個法律關鍵字就觸發
+            if expert_type == AgentType.LEGAL_EXPERT and matches >= 1:
+                required_experts.add(expert_type)
+                logger.info(f"Legal expert triggered by {matches} keyword matches")
+            # 其他專家：使用原有邏輯
+            elif match_ratio > 0.1 or matches >= 2:
                 required_experts.add(expert_type)
 
         # 如果沒有明確匹配，默認使用理財專家
@@ -180,6 +191,7 @@ class ManagerAgent(BaseAgent):
             required_experts.add(AgentType.FINANCIAL_PLANNER)
             logger.info("No specific expertise detected, defaulting to financial planner")
 
+        logger.info(f"Query: '{query}' -> Experts: {[e.value for e in required_experts]}, Scores: {[(k.value, v) for k, v in scores.items()]}")
         return required_experts
 
     async def _extract_key_concepts(self, query: str) -> List[str]:
