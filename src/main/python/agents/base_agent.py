@@ -15,6 +15,14 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
+# 信心度計算系統
+try:
+    from ..evaluation.confidence_calculator import confidence_calculator, ConfidenceMetrics
+except ImportError:
+    # 測試環境降級
+    confidence_calculator = None
+    ConfidenceMetrics = None
+
 # LLM 相關導入
 try:
     from ..llm import generate_llm_response, is_llm_configured, LLMResponse
@@ -172,8 +180,11 @@ class BaseAgent(ABC):
             # 5. 後處理回應
             final_content = self._post_process_response(response_content)
 
-            # 6. 計算信心度
-            confidence = self._calculate_confidence(query, knowledge_results)
+            # 6. 計算智能信心度
+            confidence_metrics = await self._calculate_smart_confidence(
+                query, final_content, knowledge_results, personal_context
+            )
+            confidence = confidence_metrics.overall_confidence if confidence_metrics else self._calculate_fallback_confidence(query, knowledge_results)
 
             # 7. 建立回應
             response = self.create_response(
@@ -183,7 +194,14 @@ class BaseAgent(ABC):
                     "knowledge_used": len(knowledge_results),
                     "personal_context_used": bool(personal_context),
                     "agent_type": self.agent_type.value,
-                    "processing_time": datetime.now().isoformat()
+                    "processing_time": datetime.now().isoformat(),
+                    # 新增信心度詳細指標
+                    "confidence_metrics": confidence_metrics.to_dict() if confidence_metrics and hasattr(confidence_metrics, 'to_dict') else {
+                        "relevance_score": confidence_metrics.relevance_score if confidence_metrics else 0.0,
+                        "response_quality": confidence_metrics.response_quality if confidence_metrics else 0.0,
+                        "knowledge_coverage": confidence_metrics.knowledge_coverage if confidence_metrics else 0.0,
+                        "domain_expertise": confidence_metrics.domain_expertise if confidence_metrics else 0.0
+                    }
                 },
                 sources=self._extract_sources(knowledge_results),
                 confidence=confidence
@@ -310,25 +328,56 @@ class BaseAgent(ABC):
 
         return response
 
-    def _calculate_confidence(self, query: str, knowledge_results: List[Dict]) -> float:
-        """計算回應信心度"""
-        base_confidence = 0.7
+    async def _calculate_smart_confidence(
+        self,
+        query: str,
+        response_content: str,
+        knowledge_results: List[Dict],
+        personal_context: Dict[str, Any]
+    ) -> Optional[ConfidenceMetrics]:
+        """使用智能信心度計算系統
 
-        # 根據檢索結果數量調整
-        if len(knowledge_results) >= 5:
-            base_confidence += 0.1
-        elif len(knowledge_results) >= 3:
-            base_confidence += 0.05
+        Linus 哲學：好品味的設計
+        - 用智能演算法替代硬編碼規則
+        - 基於多維度分析而非簡單加成
+        """
+        if not confidence_calculator:
+            return None
 
-        # 根據查詢明確度調整
-        if len(query) > 10:
-            base_confidence += 0.05
+        try:
+            return await confidence_calculator.calculate_confidence(
+                query=query,
+                response_content=response_content,
+                knowledge_results=knowledge_results,
+                agent_type=self.agent_type.value,
+                personal_context=personal_context
+            )
+        except Exception as e:
+            self.logger.warning(f"Smart confidence calculation failed: {e}")
+            return None
 
-        # 如果使用真實 LLM，提高信心度
+    def _calculate_fallback_confidence(self, query: str, knowledge_results: List[Dict]) -> float:
+        """降級信心度計算（原有邏輯的改進版）
+
+        當智能計算失敗時使用，但仍比原版更精確
+        """
+        # 基礎分數：根據是否有知識檢索
+        if knowledge_results:
+            base_confidence = 0.5 + (min(len(knowledge_results), 5) * 0.08)  # 0.5-0.9
+        else:
+            base_confidence = 0.4  # 無知識檢索降低基礎分數
+
+        # 查詢複雜度調整（比原版更精確）
+        query_complexity = min(len(query.split()), 10) / 10  # 詞數複雜度
+        base_confidence += query_complexity * 0.1
+
+        # LLM 可用性加成
         if is_llm_configured():
-            base_confidence += 0.15
+            base_confidence += 0.1
+        else:
+            base_confidence *= 0.8  # 無 LLM 時大幅降低
 
-        return min(base_confidence, 0.95)
+        return min(0.9, max(0.2, base_confidence))  # 擴大範圍到 0.2-0.9
 
     def _extract_sources(self, knowledge_results: List[Dict]) -> List[str]:
         """提取資料來源"""
