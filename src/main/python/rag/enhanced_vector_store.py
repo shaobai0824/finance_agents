@@ -323,6 +323,74 @@ class EnhancedVectorStore(ChromaVectorStore):
 
         return chunks
 
+    def search_with_context_expansion(
+        self,
+        query: str,
+        n_results: int = 5,
+        include_article_context: bool = True,
+        max_chunks_per_article: int = 3,
+        context_similarity_threshold: float = 0.3,
+        chunking_method_filter: Optional[str] = None,
+        min_coherence: Optional[float] = None,
+        include_metadata: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        帶文章上下文擴展的智能檢索
+
+        Args:
+            query: 搜尋查詢
+            n_results: 基本檢索結果數量
+            include_article_context: 是否包含同篇文章的其他chunks
+            max_chunks_per_article: 每篇文章最多返回的chunks數量
+            context_similarity_threshold: 上下文chunks的最低相似度閾值
+            chunking_method_filter: 切割方式過濾
+            min_coherence: 最小語意一致性閾值
+            include_metadata: 是否包含詳細元數據
+
+        Returns:
+            擴展後的搜尋結果列表
+        """
+
+        # 1. 執行基本檢索
+        primary_results = self.search_with_metadata_filtering(
+            query, n_results, chunking_method_filter, min_coherence, include_metadata
+        )
+
+        if not include_article_context or not primary_results:
+            return primary_results
+
+        # 2. 文章上下文擴展
+        expanded_results = []
+        processed_articles = set()
+
+        for result in primary_results:
+            article_id = result.get('metadata', {}).get('original_document_id')
+
+            if not article_id or article_id in processed_articles:
+                expanded_results.append(result)
+                continue
+
+            # 獲取同篇文章的其他chunks
+            article_chunks = self._get_article_chunks_with_relevance(
+                article_id, query, max_chunks_per_article, context_similarity_threshold
+            )
+
+            # 將主要結果標記為primary
+            result['chunk_role'] = 'primary'
+            result['article_total_chunks'] = len(article_chunks)
+            expanded_results.append(result)
+
+            # 添加上下文chunks
+            for chunk in article_chunks:
+                if chunk['chunk_id'] != result.get('chunk_id'):  # 避免重複
+                    chunk['chunk_role'] = 'context'
+                    chunk['related_to_primary'] = result.get('chunk_id', 'unknown')
+                    expanded_results.append(chunk)
+
+            processed_articles.add(article_id)
+
+        return expanded_results
+
     def search_with_metadata_filtering(
         self,
         query: str,
@@ -392,6 +460,286 @@ class EnhancedVectorStore(ChromaVectorStore):
             logger.error(f"Search with filtering failed: {e}")
             # 降級到基本搜尋
             return super().search(query, n_results)
+
+    def _get_article_chunks_with_relevance(
+        self,
+        article_id: str,
+        query: str,
+        max_chunks: int,
+        similarity_threshold: float
+    ) -> List[Dict[str, Any]]:
+        """
+        獲取指定文章的所有chunks並計算與查詢的相關性
+
+        Args:
+            article_id: 文章ID
+            query: 搜尋查詢
+            max_chunks: 最大返回數量
+            similarity_threshold: 相似度閾值
+
+        Returns:
+            按相關性排序的文章chunks
+        """
+        try:
+            # 搜尋該文章的所有chunks
+            article_results = self.collection.query(
+                query_texts=[query],
+                n_results=50,  # 獲取更多結果以確保包含所有chunks
+                where={"original_document_id": article_id},
+                include=['documents', 'metadatas', 'distances', 'ids']
+            )
+
+            if not article_results['documents'] or not article_results['documents'][0]:
+                return []
+
+            # 處理結果並按相關性排序
+            chunks = []
+            for i, (doc, metadata, distance, chunk_id) in enumerate(zip(
+                article_results['documents'][0],
+                article_results['metadatas'][0],
+                article_results['distances'][0],
+                article_results['ids'][0]
+            )):
+                relevance_score = max(0, 1 - distance)
+
+                # 過濾低相關性的chunks
+                if relevance_score >= similarity_threshold:
+                    chunk_info = {
+                        'document': doc,
+                        'metadata': metadata,
+                        'relevance_score': relevance_score,
+                        'distance': distance,
+                        'chunk_id': chunk_id,
+                        'chunk_index': metadata.get('chunk_index', 0),
+                        'chunking_method': metadata.get('chunking_method', 'unknown'),
+                        'semantic_coherence': metadata.get('semantic_coherence', 0.0),
+                        'boundary_confidence': metadata.get('boundary_confidence', 0.0)
+                    }
+                    chunks.append(chunk_info)
+
+            # 按相關性分數排序，但也考慮chunk在文章中的順序
+            chunks.sort(key=lambda x: (
+                -x['relevance_score'],  # 相關性降序
+                x['chunk_index']        # 順序升序（相關性相同時保持原順序）
+            ))
+
+            return chunks[:max_chunks]
+
+        except Exception as e:
+            logger.error(f"Failed to get article chunks for {article_id}: {e}")
+            return []
+
+    def get_article_context(
+        self,
+        article_id: str,
+        include_all_chunks: bool = False,
+        sort_by_order: bool = True
+    ) -> Dict[str, Any]:
+        """
+        獲取完整的文章上下文
+
+        Args:
+            article_id: 文章ID
+            include_all_chunks: 是否包含所有chunks（忽略相關性）
+            sort_by_order: 是否按chunk順序排序
+
+        Returns:
+            完整的文章資訊
+        """
+        try:
+            # 獲取該文章的所有chunks
+            article_results = self.collection.get(
+                where={"original_document_id": article_id},
+                include=['documents', 'metadatas', 'ids']
+            )
+
+            if not article_results['documents']:
+                return {"error": f"No chunks found for article {article_id}"}
+
+            # 組織chunks資訊
+            chunks = []
+            article_metadata = {}
+
+            for i, (doc, metadata, chunk_id) in enumerate(zip(
+                article_results['documents'],
+                article_results['metadatas'],
+                article_results['ids']
+            )):
+                chunk_info = {
+                    'chunk_id': chunk_id,
+                    'chunk_index': metadata.get('chunk_index', i),
+                    'document': doc,
+                    'metadata': metadata,
+                    'chunking_method': metadata.get('chunking_method', 'unknown'),
+                    'semantic_coherence': metadata.get('semantic_coherence', 0.0),
+                    'boundary_confidence': metadata.get('boundary_confidence', 0.0),
+                    'overlap_length': metadata.get('overlap_length', 0)
+                }
+                chunks.append(chunk_info)
+
+                # 提取文章級別的元數據
+                if i == 0:
+                    article_metadata = {
+                        'source': metadata.get('source', 'unknown'),
+                        'category': metadata.get('category', 'unknown'),
+                        'total_chunks': metadata.get('total_chunks_in_document', len(chunks)),
+                        'processing_timestamp': metadata.get('processing_timestamp')
+                    }
+
+            # 排序
+            if sort_by_order:
+                chunks.sort(key=lambda x: x['chunk_index'])
+
+            # 重建完整文章內容（去除重疊）
+            full_content = self._reconstruct_article_content(chunks)
+
+            return {
+                'article_id': article_id,
+                'article_metadata': article_metadata,
+                'total_chunks': len(chunks),
+                'chunks': chunks,
+                'full_content': full_content,
+                'avg_semantic_coherence': (
+                    sum(c['semantic_coherence'] for c in chunks) / len(chunks)
+                    if chunks else 0
+                ),
+                'chunking_methods_used': list(set(c['chunking_method'] for c in chunks))
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get article context for {article_id}: {e}")
+            return {"error": str(e)}
+
+    def _reconstruct_article_content(self, chunks: List[Dict[str, Any]]) -> str:
+        """
+        從chunks重建完整文章內容（處理重疊）
+
+        Args:
+            chunks: 按順序排列的chunks列表
+
+        Returns:
+            重建的完整內容
+        """
+        if not chunks:
+            return ""
+
+        # 按chunk順序排序
+        sorted_chunks = sorted(chunks, key=lambda x: x['chunk_index'])
+
+        reconstructed = ""
+        last_core_end = 0
+
+        for chunk in sorted_chunks:
+            chunk_text = chunk['document']
+            overlap_length = chunk.get('overlap_length', 0)
+            core_start_idx = chunk.get('metadata', {}).get('core_start_idx', 0)
+
+            if overlap_length > 0 and reconstructed:
+                # 處理重疊：只添加核心部分（非重疊部分）
+                # 這需要更複雜的邏輯來正確處理重疊切割
+                # 目前簡化處理：如果有重疊，跳過可能重複的部分
+                estimated_overlap = min(overlap_length * 50, len(chunk_text) // 3)  # 估算重疊字符數
+                core_content = chunk_text[estimated_overlap:]
+                reconstructed += core_content
+            else:
+                # 沒有重疊或是第一個chunk
+                reconstructed += chunk_text
+
+        return reconstructed
+
+    def search_article_aware(
+        self,
+        query: str,
+        n_results: int = 5,
+        prioritize_complete_articles: bool = True,
+        min_article_coverage: float = 0.6
+    ) -> List[Dict[str, Any]]:
+        """
+        文章感知的檢索：優先返回能提供完整上下文的文章
+
+        Args:
+            query: 搜尋查詢
+            n_results: 返回結果數量
+            prioritize_complete_articles: 是否優先完整文章
+            min_article_coverage: 最小文章覆蓋率
+
+        Returns:
+            文章感知的檢索結果
+        """
+        try:
+            # 1. 執行基本檢索，獲取更多結果
+            initial_results = self.search_with_metadata_filtering(
+                query, n_results * 3, include_metadata=True
+            )
+
+            if not initial_results:
+                return []
+
+            # 2. 按文章分組
+            articles_map = {}
+            for result in initial_results:
+                article_id = result.get('metadata', {}).get('original_document_id', 'unknown')
+                if article_id not in articles_map:
+                    articles_map[article_id] = []
+                articles_map[article_id].append(result)
+
+            # 3. 評估每篇文章的相關性和完整性
+            article_scores = []
+            for article_id, chunks in articles_map.items():
+                if article_id == 'unknown':
+                    continue
+
+                # 計算文章級別的相關性分數
+                avg_relevance = sum(c['relevance_score'] for c in chunks) / len(chunks)
+                max_relevance = max(c['relevance_score'] for c in chunks)
+
+                # 計算文章覆蓋率
+                total_chunks_in_article = chunks[0].get('metadata', {}).get('total_chunks_in_document', len(chunks))
+                coverage = len(chunks) / total_chunks_in_article if total_chunks_in_article > 0 else 0
+
+                # 綜合評分
+                if prioritize_complete_articles:
+                    # 完整性權重更高
+                    final_score = (avg_relevance * 0.6 + max_relevance * 0.2 + coverage * 0.2)
+                else:
+                    # 相關性權重更高
+                    final_score = (avg_relevance * 0.4 + max_relevance * 0.4 + coverage * 0.2)
+
+                article_scores.append({
+                    'article_id': article_id,
+                    'chunks': chunks,
+                    'avg_relevance': avg_relevance,
+                    'max_relevance': max_relevance,
+                    'coverage': coverage,
+                    'final_score': final_score,
+                    'total_chunks': total_chunks_in_article
+                })
+
+            # 4. 排序並選擇最佳文章
+            article_scores.sort(key=lambda x: x['final_score'], reverse=True)
+
+            # 5. 構建最終結果
+            final_results = []
+            for article_info in article_scores[:n_results]:
+                if article_info['coverage'] >= min_article_coverage or not prioritize_complete_articles:
+                    # 按chunk順序排序該文章的chunks
+                    sorted_chunks = sorted(article_info['chunks'], key=lambda x: x.get('metadata', {}).get('chunk_index', 0))
+
+                    # 標記文章資訊
+                    for i, chunk in enumerate(sorted_chunks):
+                        chunk['article_score'] = article_info['final_score']
+                        chunk['article_coverage'] = article_info['coverage']
+                        chunk['chunk_role'] = 'primary' if i == 0 else 'context'
+                        chunk['article_rank'] = len(final_results) // max(1, len(sorted_chunks)) + 1
+
+                    final_results.extend(sorted_chunks)
+
+            return final_results[:n_results]
+
+        except Exception as e:
+            logger.error(f"Article-aware search failed: {e}")
+            # 降級到基本檢索
+            return self.search_with_metadata_filtering(query, n_results)
 
     def get_performance_stats(self) -> Dict[str, Any]:
         """獲取效能統計"""
