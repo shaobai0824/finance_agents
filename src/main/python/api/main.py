@@ -23,7 +23,7 @@ load_dotenv()
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..workflow.finance_workflow_llm import FinanceWorkflowLLM
 from ..rag import ChromaVectorStore, KnowledgeRetriever
@@ -340,6 +340,122 @@ async def process_query(request: QueryRequest):
             status_code=500,
             detail=f"查詢處理失敗：{str(e)}"
         )
+
+
+@app.post("/query/stream")
+async def process_query_stream(request: QueryRequest):
+    """處理理財諮詢查詢（流式回應）
+
+    使用 Server-Sent Events (SSE) 逐塊返回回應
+    提供更好的用戶體驗，減少感知延遲
+    """
+    session_id = request.session_id or str(uuid.uuid4())
+
+    async def event_generator():
+        """SSE 事件生成器"""
+        try:
+            logger.info(f"Starting streaming query for session: {session_id}")
+
+            # 檢查服務是否就緒
+            if not finance_workflow:
+                yield f"data: {json.dumps({'error': '理財諮詢服務尚未就緒'})}\n\n"
+                return
+
+            # 管理對話記憶
+            if session_id not in session_memories:
+                session_memories[session_id] = ConversationMemory(
+                    session_id=session_id,
+                    max_turns=10,
+                    max_context_tokens=4000
+                )
+                logger.info(f"Created new conversation memory for session: {session_id}")
+
+            memory = session_memories[session_id]
+
+            # 從前端歷史恢復
+            if request.conversation_history:
+                memory.clear()
+                for hist_item in request.conversation_history:
+                    role = MessageRole(hist_item.role)
+                    memory.add_message(role=role, content=hist_item.content)
+                logger.info(f"Restored {len(request.conversation_history)} messages from frontend")
+
+            # 添加當前使用者查詢
+            memory.add_message(role=MessageRole.USER, content=request.query)
+
+            # 取得對話歷史
+            conversation_history = memory.get_context_for_llm(include_system_prompt=False)
+
+            # 發送開始事件
+            yield f"data: {json.dumps({'type': 'start', 'session_id': session_id})}\n\n"
+
+            # 執行工作流程（使用流式模式）
+            # 注意：需要修改 workflow 以支援流式
+            from ..workflow.finance_workflow_llm import FinanceWorkflowLLM
+
+            # 暫時使用普通模式，後續修改 workflow
+            workflow_result = await finance_workflow.run(
+                user_query=request.query,
+                user_profile=request.user_profile,
+                session_id=session_id,
+                conversation_history=conversation_history,
+                stream=True  # 啟用流式模式
+            )
+
+            # 檢查是否為 async generator（流式）
+            if hasattr(workflow_result, '__aiter__'):
+                # 流式模式：逐塊發送
+                full_content = ""
+                async for chunk in workflow_result:
+                    if isinstance(chunk, dict) and 'content' in chunk:
+                        content_piece = chunk['content']
+                        full_content += content_piece
+                        yield f"data: {json.dumps({'type': 'content', 'content': content_piece})}\n\n"
+                    elif isinstance(chunk, str):
+                        full_content += chunk
+                        yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
+
+                # 保存完整回應到記憶
+                memory.add_message(
+                    role=MessageRole.ASSISTANT,
+                    content=full_content,
+                    confidence=0.5
+                )
+
+                # 發送完成事件
+                yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+            else:
+                # 降級到普通模式：一次性發送
+                final_response = workflow_result.get("final_response", "")
+                yield f"data: {json.dumps({'type': 'content', 'content': final_response})}\n\n"
+
+                # 保存到記憶
+                memory.add_message(
+                    role=MessageRole.ASSISTANT,
+                    content=final_response,
+                    confidence=workflow_result.get("confidence_score", 0.0)
+                )
+
+                yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+
+            logger.info(f"Streaming query completed for session: {session_id}")
+
+        except Exception as e:
+            logger.error(f"Streaming query failed: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+
+    import json
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # 禁用 nginx buffering
+        }
+    )
 
 
 @app.get("/session/{session_id}/status", response_model=WorkflowStatus)

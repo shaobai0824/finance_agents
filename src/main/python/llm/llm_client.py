@@ -116,6 +116,83 @@ class OpenAIClient(BaseLLMClient):
             traceback.print_exc()
             raise
 
+    async def generate_response_stream(self, prompt: str = None, messages: List[Dict[str, str]] = None, **kwargs):
+        """生成 OpenAI 流式回應
+
+        使用 async generator 逐塊返回回應內容
+        用於實現 Server-Sent Events (SSE)
+
+        Yields:
+            str: 每個 token 或 token 組
+        """
+        import time
+        start_time = time.time()
+
+        try:
+            # 避免參數重複
+            api_kwargs = kwargs.copy()
+            max_tokens = api_kwargs.pop("max_tokens", 1000)
+            temperature = api_kwargs.pop("temperature", 0.7)
+            api_kwargs.pop("model", None)
+
+            # 決定使用哪種模式
+            if messages:
+                chat_messages = messages
+            elif prompt:
+                chat_messages = [{"role": "user", "content": prompt}]
+            else:
+                raise ValueError("Either 'prompt' or 'messages' must be provided")
+
+            self.logger.info(f"Starting streaming from OpenAI API with model={self.model}, messages={len(chat_messages)}")
+
+            # 創建流式請求
+            import asyncio
+            stream = await asyncio.to_thread(
+                self.client.chat.completions.create,
+                model=self.model,
+                messages=chat_messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=True,  # 啟用流式回應
+                **api_kwargs
+            )
+
+            # 逐塊產出回應
+            full_content = ""
+            async for chunk in self._async_iterate_stream(stream):
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if hasattr(delta, 'content') and delta.content:
+                        content_piece = delta.content
+                        full_content += content_piece
+                        yield content_piece
+
+            response_time = time.time() - start_time
+            self.logger.info(f"OpenAI streaming completed in {response_time:.2f}s, total content: {len(full_content)} chars")
+
+        except Exception as e:
+            self.logger.error(f"OpenAI streaming error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+    async def _async_iterate_stream(self, stream):
+        """將同步 stream 轉換為 async generator"""
+        import asyncio
+        loop = asyncio.get_event_loop()
+
+        def get_next_chunk():
+            try:
+                return next(stream)
+            except StopIteration:
+                return None
+
+        while True:
+            chunk = await loop.run_in_executor(None, get_next_chunk)
+            if chunk is None:
+                break
+            yield chunk
+
 class AnthropicClient(BaseLLMClient):
     """Anthropic Claude 客戶端"""
 
@@ -250,6 +327,39 @@ class LLMManager:
             raise ValueError(f"LLM client '{client_name}' not available")
 
         return await self.clients[client_name].generate_response(prompt=prompt, messages=messages, **kwargs)
+
+    async def generate_response_stream(self,
+                                      prompt: str = None,
+                                      messages: List[Dict[str, str]] = None,
+                                      client_name: Optional[str] = None,
+                                      **kwargs):
+        """生成流式回應
+
+        支援兩種模式：
+        1. prompt 模式
+        2. messages 模式
+
+        Yields:
+            str: 回應的每個塊
+        """
+        client_name = client_name or self.default_client
+
+        if client_name not in self.clients:
+            raise ValueError(f"LLM client '{client_name}' not available")
+
+        client = self.clients[client_name]
+
+        # 檢查客戶端是否支援流式回應
+        if not hasattr(client, 'generate_response_stream'):
+            # 如果不支援，退回到普通模式並一次性返回
+            self.logger.warning(f"Client {client_name} doesn't support streaming, falling back to normal mode")
+            response = await client.generate_response(prompt=prompt, messages=messages, **kwargs)
+            yield response.content
+            return
+
+        # 使用流式回應
+        async for chunk in client.generate_response_stream(prompt=prompt, messages=messages, **kwargs):
+            yield chunk
 
     def get_available_clients(self) -> List[str]:
         """取得可用的客戶端清單"""
