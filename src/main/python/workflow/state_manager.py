@@ -63,6 +63,10 @@ class FinanceState(TypedDict):
     user_profile: Optional[Dict[str, Any]]
     user_financial_data: Optional[Dict[str, Any]]
 
+    # 對話記憶（新增）
+    conversation_memory: Optional[Dict[str, Any]]  # ConversationMemory 序列化
+    conversation_history: Optional[List[Dict[str, str]]]  # OpenAI 格式的歷史
+
 
 class StateManager:
     """狀態管理器
@@ -77,7 +81,8 @@ class StateManager:
         self,
         session_id: str,
         user_query: str,
-        user_profile: Optional[Dict[str, Any]] = None
+        user_profile: Optional[Dict[str, Any]] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> FinanceState:
         """建立初始狀態
 
@@ -104,7 +109,10 @@ class StateManager:
             error_messages=[],
 
             user_profile=user_profile,
-            user_financial_data=None
+            user_financial_data=None,
+
+            conversation_memory=None,
+            conversation_history=conversation_history
         )
 
     def update_routing_info(
@@ -279,6 +287,26 @@ class StateManager:
         # 目前僅記錄日誌
         pass
 
+    def update_conversation_history(
+        self,
+        state: FinanceState,
+        history: List[Dict[str, str]]
+    ) -> FinanceState:
+        """更新對話歷史到狀態
+
+        Args:
+            state: 當前狀態
+            history: OpenAI 格式的對話歷史
+        """
+        state["conversation_history"] = history
+
+        # 記錄執行日誌
+        self._add_execution_log(state, "conversation_history_updated", {
+            "history_length": len(history)
+        })
+
+        return state
+
     def get_state_summary(self, state: FinanceState) -> Dict[str, Any]:
         """取得狀態摘要（用於監控和除錯）"""
         return {
@@ -289,5 +317,7 @@ class StateManager:
             "overall_confidence": self.calculate_overall_confidence(state),
             "has_final_response": state["final_response"] is not None,
             "error_count": len(state["error_messages"]),
-            "execution_steps": len(state["execution_log"])
+            "execution_steps": len(state["execution_log"]),
+            "has_conversation_history": state.get("conversation_history") is not None,
+            "conversation_history_length": len(state.get("conversation_history", []))
         }

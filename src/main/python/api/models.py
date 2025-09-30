@@ -21,11 +21,37 @@ class RiskTolerance(str, Enum):
     AGGRESSIVE = "aggressive"
 
 
+class ConversationHistoryItem(BaseModel):
+    """對話歷史項目
+
+    Linus 簡潔：直接對應 OpenAI message 格式
+    """
+    role: str = Field(..., description="角色：user, assistant, system")
+    content: str = Field(..., description="訊息內容")
+    timestamp: Optional[str] = Field(None, description="時間戳記")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "role": "user",
+                "content": "我想了解如何投資股票",
+                "timestamp": "2025-01-26T10:30:00"
+            }
+        }
+
+
 class QueryRequest(BaseModel):
-    """諮詢請求模型"""
+    """諮詢請求模型
+
+    Linus Never break userspace：conversation_history 是可選的，舊版前端仍可正常運作
+    """
     query: str = Field(..., description="使用者查詢內容", min_length=1, max_length=1000)
     user_profile: Optional[Dict[str, Any]] = Field(None, description="使用者資料")
     session_id: Optional[str] = Field(None, description="會話 ID")
+    conversation_history: Optional[List[ConversationHistoryItem]] = Field(
+        None,
+        description="對話歷史（可選）"
+    )
 
     @validator('query')
     def validate_query(cls, v):
@@ -36,12 +62,23 @@ class QueryRequest(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "query": "我想要投資建議，有什麼推薦的投資組合嗎？",
+                "query": "那如果我風險承受度較高呢？",
                 "user_profile": {
                     "age": 30,
                     "risk_tolerance": "moderate",
                     "income_level": "middle"
-                }
+                },
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "conversation_history": [
+                    {
+                        "role": "user",
+                        "content": "我想要投資建議，有什麼推薦的投資組合嗎？"
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "根據您的風險承受度，建議配置60%股票、30%債券、10%現金..."
+                    }
+                ]
             }
         }
 
