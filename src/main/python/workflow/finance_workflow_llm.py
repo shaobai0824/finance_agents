@@ -199,15 +199,21 @@ class FinanceWorkflowLLM:
         """路由查詢到適當的專家"""
         try:
             query = state["user_query"]
+            logger.info(f"Starting query routing for: {query[:50]}...")
 
-            # 使用管理代理人進行路由決策
+            # 使用管理代理人進行路由決策（添加超時保護）
             routing_message = AgentMessage(
                 agent_type=AgentType.MANAGER,
                 message_type=MessageType.QUERY,
                 content=query
             )
 
-            routing_response = await self.manager_agent.process_message(routing_message)
+            logger.info("Calling manager agent for routing...")
+            routing_response = await asyncio.wait_for(
+                self.manager_agent.process_message(routing_message),
+                timeout=10.0  # 路由決策最多 10 秒
+            )
+            logger.info("Manager agent routing completed")
 
             # 安全獲取 metadata
             if routing_response.metadata and "required_experts" in routing_response.metadata:
@@ -235,8 +241,15 @@ class FinanceWorkflowLLM:
 
             return state
 
+        except asyncio.TimeoutError:
+            logger.error("Query routing timed out after 10s, using default expert")
+            state["required_experts"] = [AgentType.FINANCIAL_PLANNER]  # 預設使用理財規劃師
+            state["routing_decision"] = "路由超時，使用預設理財規劃專家"
+            return state
         except Exception as e:
             logger.error(f"Query routing failed: {e}")
+            import traceback
+            traceback.print_exc()
             state["required_experts"] = [AgentType.FINANCIAL_PLANNER]  # 預設使用理財規劃師
             return state
 
@@ -252,13 +265,15 @@ class FinanceWorkflowLLM:
             conversation_history = state.get("conversation_history", [])
 
             logger.info(f"Processing experts for session: {state['session_id']}")
+            logger.info(f"Required experts: {[e.value for e in required_experts]}")
             if conversation_history:
                 logger.info(f"Using conversation history with {len(conversation_history)} messages")
 
-            # 準備專家任務
+            # 準備專家任務（添加超時保護）
             expert_tasks = []
             for expert_type in required_experts:
                 if expert_type in self.experts:
+                    logger.info(f"Preparing task for expert: {expert_type.value}")
                     message = AgentMessage(
                         agent_type=expert_type,
                         message_type=MessageType.QUERY,
@@ -268,33 +283,66 @@ class FinanceWorkflowLLM:
                             "conversation_history": conversation_history  # 傳遞對話歷史
                         }
                     )
-                    task = self._process_single_expert(expert_type, message)
+                    # 添加超時保護：每個專家最多 20 秒
+                    task = asyncio.wait_for(
+                        self._process_single_expert(expert_type, message),
+                        timeout=20.0
+                    )
                     expert_tasks.append((expert_type, task))
+                else:
+                    logger.warning(f"Expert type {expert_type.value} not found in experts dict")
 
-            # 並行執行專家諮詢
+            # 真正並行執行所有專家諮詢（使用 asyncio.gather）
+            logger.info(f"Starting parallel execution of {len(expert_tasks)} expert tasks...")
             expert_results = {}
             expert_sources = {}
 
-            for expert_type, task in expert_tasks:
-                try:
-                    response = await task
-                    expert_results[expert_type.value] = {
-                        "content": response.content,
-                        "confidence": response.confidence,
-                        "metadata": response.metadata
-                    }
-                    expert_sources[expert_type.value] = response.sources
+            # 分離 expert_types 和 tasks
+            expert_types = [et for et, _ in expert_tasks]
+            tasks = [t for _, t in expert_tasks]
 
-                    logger.info(f"Expert {expert_type.value} responded successfully")
+            # 使用 gather 並行執行，return_exceptions=True 確保單個失敗不影響其他
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # 處理結果
+            for expert_type, result in zip(expert_types, results):
+                try:
+                    if isinstance(result, Exception):
+                        # 處理異常（包括超時）
+                        if isinstance(result, asyncio.TimeoutError):
+                            logger.error(f"Expert {expert_type.value} timed out after 20s")
+                            error_msg = "專家處理超時，請稍後再試"
+                        else:
+                            logger.error(f"Expert {expert_type.value} failed: {result}")
+                            error_msg = f"專家諮詢失敗：{str(result)}"
+
+                        expert_results[expert_type.value] = {
+                            "content": error_msg,
+                            "confidence": 0.0,
+                            "metadata": {"error": str(result)}
+                        }
+                        expert_sources[expert_type.value] = []
+                    else:
+                        # 成功響應
+                        response = result
+                        expert_results[expert_type.value] = {
+                            "content": response.content,
+                            "confidence": response.confidence,
+                            "metadata": response.metadata
+                        }
+                        expert_sources[expert_type.value] = response.sources
+                        logger.info(f"Expert {expert_type.value} responded successfully")
 
                 except Exception as e:
-                    logger.error(f"Expert {expert_type.value} failed: {e}")
+                    logger.error(f"Error processing result from {expert_type.value}: {e}")
                     expert_results[expert_type.value] = {
-                        "content": f"專家諮詢失敗：{str(e)}",
+                        "content": f"結果處理失敗：{str(e)}",
                         "confidence": 0.0,
                         "metadata": {"error": str(e)}
                     }
                     expert_sources[expert_type.value] = []
+
+            logger.info(f"Expert processing complete. Got {len(expert_results)} results")
 
             # 更新狀態
             state["expert_responses"] = expert_results
@@ -304,6 +352,8 @@ class FinanceWorkflowLLM:
 
         except Exception as e:
             logger.error(f"Expert processing failed: {e}")
+            import traceback
+            traceback.print_exc()
             state["expert_responses"] = {}
             state["expert_sources"] = {}
             return state
