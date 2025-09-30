@@ -295,10 +295,12 @@ class BaseAgent(ABC):
             })
 
             # 使用 messages 格式呼叫 LLM
+            self.logger.info(f"Calling LLM with {len(messages)} messages...")
             response = await generate_llm_response(
                 messages=messages,
                 **self.llm_config
             )
+            self.logger.info(f"LLM response received: {len(response.content)} chars")
             return response.content
 
         except Exception as e:

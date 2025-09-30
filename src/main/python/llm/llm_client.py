@@ -85,6 +85,7 @@ class OpenAIClient(BaseLLMClient):
             else:
                 raise ValueError("Either 'prompt' or 'messages' must be provided")
 
+            self.logger.info(f"Calling OpenAI API with model={self.model}, messages={len(chat_messages)}, max_tokens={max_tokens}")
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=chat_messages,
@@ -94,6 +95,7 @@ class OpenAIClient(BaseLLMClient):
             )
 
             response_time = time.time() - start_time
+            self.logger.info(f"OpenAI API returned in {response_time:.2f}s")
 
             return LLMResponse(
                 content=response.choices[0].message.content,
@@ -105,6 +107,8 @@ class OpenAIClient(BaseLLMClient):
 
         except Exception as e:
             self.logger.error(f"OpenAI API error: {e}")
+            import traceback
+            traceback.print_exc()
             raise
 
 class AnthropicClient(BaseLLMClient):
@@ -225,16 +229,22 @@ class LLMManager:
             self.logger.info("Using mock LLM client (no API keys provided)")
 
     async def generate_response(self,
-                              prompt: str,
+                              prompt: str = None,
+                              messages: List[Dict[str, str]] = None,
                               client_name: Optional[str] = None,
                               **kwargs) -> LLMResponse:
-        """生成回應"""
+        """生成回應
+
+        支援兩種模式：
+        1. prompt 模式：generate_response(prompt="...")
+        2. messages 模式：generate_response(messages=[...])
+        """
         client_name = client_name or self.default_client
 
         if client_name not in self.clients:
             raise ValueError(f"LLM client '{client_name}' not available")
 
-        return await self.clients[client_name].generate_response(prompt, **kwargs)
+        return await self.clients[client_name].generate_response(prompt=prompt, messages=messages, **kwargs)
 
     def get_available_clients(self) -> List[str]:
         """取得可用的客戶端清單"""
