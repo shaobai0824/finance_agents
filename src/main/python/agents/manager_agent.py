@@ -37,17 +37,22 @@ class ManagerAgent(BaseAgent):
         self.expert_keywords = {
             AgentType.FINANCIAL_PLANNER: {
                 "keywords": [
-                    "投資建議", "理財規劃", "資產配置", "風險評估", "退休規劃",
-                    "保險", "儲蓄", "個人財務", "投資組合", "資金分配",
-                    "investment", "portfolio", "savings", "retirement", "insurance"
+                    "理財規劃", "資產配置", "風險評估", "退休規劃", "投資建議",
+                    "保險", "儲蓄", "個人財務", "投資組合", "資金分配", "理財",
+                    "個人理財", "財務規劃", "風險管理", "退休", "養老",
+                    "investment advice", "portfolio", "savings", "retirement", "insurance",
+                    "personal finance", "financial planning"
                 ],
                 "confidence_boost": 0.3
             },
             AgentType.FINANCIAL_ANALYST: {
                 "keywords": [
                     "市場分析", "股票", "債券", "基金", "匯率", "經濟情勢",
-                    "技術分析", "財報分析", "產業趨勢", "金融數據",
-                    "stock", "market", "analysis", "economic", "trend", "data"
+                    "技術分析", "財報分析", "產業趨勢", "金融數據", "台積電",
+                    "個股", "股價", "漲跌", "市場", "分析", "報告", "投資分析",
+                    "股市", "台股", "美股", "股票推薦", "股票建議", "股票投資",
+                    "stock", "market", "analysis", "economic", "trend", "data",
+                    "share", "equity", "finance"
                 ],
                 "confidence_boost": 0.3
             },
@@ -178,13 +183,19 @@ class ManagerAgent(BaseAgent):
             score = matches + match_ratio
             scores[expert_type] = score
 
-            # 法律專家的特殊處理：只要有一個法律關鍵字就觸發
+            # 專家觸發邏輯優化
             if expert_type == AgentType.LEGAL_EXPERT and matches >= 1:
+                # 法律專家：只要有一個法律關鍵字就觸發
                 required_experts.add(expert_type)
                 logger.info(f"Legal expert triggered by {matches} keyword matches")
-            # 其他專家：使用原有邏輯
-            elif match_ratio > 0.1 or matches >= 2:
+            elif expert_type == AgentType.FINANCIAL_ANALYST and matches >= 1:
+                # 金融分析專家：只要有一個關鍵字就觸發（因為關鍵字很具體）
                 required_experts.add(expert_type)
+                logger.info(f"Financial analyst triggered by {matches} keyword matches")
+            elif expert_type == AgentType.FINANCIAL_PLANNER and (match_ratio > 0.08 or matches >= 2):
+                # 理財規劃專家：使用較寬鬆的匹配條件
+                required_experts.add(expert_type)
+                logger.info(f"Financial planner triggered by {matches} keyword matches, ratio {match_ratio:.3f}")
 
         # 如果沒有明確匹配，默認使用理財專家
         if not required_experts:

@@ -17,13 +17,13 @@ from typing import Any, Dict, List, Optional
 from langgraph.graph import END, START, StateGraph
 
 from ..agents import ManagerAgent
-from ..agents.financial_planner_agent_llm import FinancialPlannerAgentLLM
-from ..agents.financial_analyst_agent_llm import FinancialAnalystAgentLLM
-from ..agents.legal_expert_agent_llm import LegalExpertAgentLLM
 from ..agents.base_agent import AgentMessage, AgentType, MessageType
-from ..rag import KnowledgeRetriever, ChromaVectorStore
+from ..agents.financial_analyst_agent_llm import FinancialAnalystAgentLLM
+from ..agents.financial_planner_agent_llm import FinancialPlannerAgentLLM
+from ..agents.legal_expert_agent_llm import LegalExpertAgentLLM
 from ..database import PersonalFinanceDB
 from ..llm import is_llm_configured
+from ..rag import ChromaVectorStore, KnowledgeRetriever
 from .state_manager import FinanceState, StateManager, WorkflowStatus
 
 logger = logging.getLogger(__name__)
@@ -413,5 +413,5 @@ class FinanceWorkflowLLM:
             },
             "rag_system": bool(self.knowledge_retriever),
             "personal_db": bool(self.personal_db),
-            "active_sessions": len(self.state_manager.sessions)
+            "active_sessions": len(self.state_manager.session_id)
         }

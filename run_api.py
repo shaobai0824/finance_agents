@@ -29,7 +29,7 @@ try:
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8002,  # 使用不同端口避免衝突
+        port=8000,  # 使用不同端口避免衝突
         reload=False,  # 關閉自動重載避免問題
         log_level="info"
     )

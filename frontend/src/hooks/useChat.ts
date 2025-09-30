@@ -128,17 +128,8 @@ export const useChat = () => {
         setState(prev => ({ ...prev, sessionId: response.session_id }));
       }
 
-      // 格式化專家回應內容
+      // 直接使用後端回應，避免重複內容
       let formattedContent = response.final_response;
-
-      if (response.expert_responses.length > 0) {
-        formattedContent += '\n\n---\n\n### 📊 專家詳細分析\n\n';
-
-        response.expert_responses.forEach((expert, index) => {
-          const expertIcon = getExpertIcon(expert.expert_type);
-          formattedContent += `**${expertIcon} ${expert.expert_type}專家** (信心度: ${(expert.confidence * 100).toFixed(1)}%)\n\n${expert.content}\n\n`;
-        });
-      }
 
       // 添加處理時間和來源資訊
       if (response.processing_time) {

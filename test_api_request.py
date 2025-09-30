@@ -5,12 +5,14 @@
 
 import asyncio
 import json
+
 import aiohttp
+
 
 async def test_api():
     """測試 API 端點"""
 
-    url = "http://localhost:8002/query"
+    url = "http://localhost:8000/query"
     data = {
         "query": "我想要投資建議",
         "user_profile": {"age": 30},

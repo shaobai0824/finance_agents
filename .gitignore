@@ -101,6 +101,9 @@ temp/
 *.tmp
 *.bak
 
+# Backup files
+backup/
+
 # Windows
 Thumbs.db
 ehthumbs.db
