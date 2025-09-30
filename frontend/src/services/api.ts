@@ -63,11 +63,115 @@ export class FinanceAgentsAPI {
   }
 
   /**
-   * 發送理財諮詢查詢
+   * 發送理財諮詢查詢（普通模式）
    */
   static async sendQuery(request: QueryRequest): Promise<QueryResponse> {
     const response: AxiosResponse<QueryResponse> = await apiClient.post('/query', request);
     return response.data;
+  }
+
+  /**
+   * 發送理財諮詢查詢（流式模式）
+   * 使用 EventSource (SSE) 接收逐塊回應
+   *
+   * @param request 查詢請求
+   * @param onChunk 接收到新內容塊的回調函數
+   * @param onDone 完成時的回調函數
+   * @param onError 錯誤時的回調函數
+   * @returns EventSource 實例（可用於取消請求）
+   */
+  static sendQueryStream(
+    request: QueryRequest,
+    onChunk: (content: string) => void,
+    onDone: (sessionId: string) => void,
+    onError: (error: string) => void
+  ): EventSource {
+    // 構建 URL 和查詢參數
+    const url = new URL(`${API_BASE_URL}/query/stream`);
+
+    // 由於 EventSource 只支援 GET，我們需要使用 fetch + ReadableStream
+    // 或者使用 POST with fetch 的 EventSource polyfill
+    // 這裡採用原生 fetch + SSE 手動解析
+
+    // 創建 AbortController 以支援取消
+    const controller = new AbortController();
+
+    // 使用 fetch 發送 POST 請求
+    fetch(`${API_BASE_URL}/query/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+      },
+      body: JSON.stringify(request),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+
+        if (!reader) {
+          throw new Error('無法讀取回應流');
+        }
+
+        // 讀取流
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) {
+            break;
+          }
+
+          // 解碼並解析 SSE 數據
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6); // 移除 'data: ' 前綴
+
+              try {
+                const event = JSON.parse(data);
+
+                switch (event.type) {
+                  case 'start':
+                    console.log('Stream started:', event.session_id);
+                    break;
+                  case 'content':
+                    onChunk(event.content);
+                    break;
+                  case 'done':
+                    onDone(event.session_id);
+                    break;
+                  case 'error':
+                    onError(event.error);
+                    break;
+                }
+              } catch (e) {
+                console.error('Failed to parse SSE data:', data, e);
+              }
+            }
+          }
+        }
+      })
+      .catch((error) => {
+        if (error.name === 'AbortError') {
+          console.log('Stream aborted');
+        } else {
+          console.error('Stream error:', error);
+          onError(error.message || '流式請求失敗');
+        }
+      });
+
+    // 返回一個可用於取消的對象（模擬 EventSource 接口）
+    return {
+      close: () => controller.abort(),
+      readyState: 1, // OPEN
+    } as EventSource;
   }
 
   /**

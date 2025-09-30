@@ -115,7 +115,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ className }) => {
   const {
     messages,
     isLoading,
-    sendQuery,
+    sendQueryStream,  // 使用流式查詢（原 sendQuery）
     messagesEndRef,
     error
   } = useChat();
@@ -149,7 +149,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ className }) => {
       </MessagesArea>
 
       <MessageInput
-        onSendMessage={sendQuery}
+        onSendMessage={sendQueryStream}  // 使用流式查詢
         isLoading={isLoading}
         placeholder="請輸入您的理財問題..."
       />

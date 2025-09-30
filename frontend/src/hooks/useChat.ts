@@ -179,7 +179,120 @@ export const useChat = () => {
     } finally {
       setState(prev => ({ ...prev, isLoading: false }));
     }
-  }, [state.userProfile, state.sessionId, addMessage, updateMessage]);
+  }, [state.userProfile, state.sessionId, state.messages, addMessage, updateMessage]);
+
+  // 發送查詢（流式模式）
+  const sendQueryStream = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      toast.error('請輸入您的理財問題');
+      return;
+    }
+
+    // 添加用戶訊息
+    const userMessageId = addMessage({
+      type: 'user',
+      content: query,
+    });
+
+    // 添加載入中的助手訊息
+    const assistantMessageId = addMessage({
+      type: 'assistant',
+      content: '',  // 初始為空，將逐塊填充
+      loading: true,
+    });
+
+    // 設定載入狀態
+    setState(prev => ({ ...prev, isLoading: true, error: null }));
+
+    try {
+      // 構建對話歷史
+      const conversationHistory = state.messages
+        .filter(msg => !msg.loading && msg.type !== 'system')
+        .map(msg => ({
+          role: msg.type as 'user' | 'assistant',
+          content: msg.content,
+          timestamp: msg.timestamp.toISOString()
+        }));
+
+      // 準備 API 請求
+      const request: QueryRequest = {
+        query: query.trim(),
+        user_profile: state.userProfile,
+        session_id: state.sessionId || undefined,
+        conversation_history: conversationHistory.length > 0 ? conversationHistory : undefined,
+      };
+
+      let accumulatedContent = '';
+      const startTime = Date.now();
+
+      // 發送流式 API 請求
+      const eventSource = FinanceAgentsAPI.sendQueryStream(
+        request,
+        // onChunk: 接收到新內容
+        (content: string) => {
+          accumulatedContent += content;
+          updateMessage(assistantMessageId, {
+            content: accumulatedContent,
+            loading: true,  // 仍在接收中
+          });
+        },
+        // onDone: 完成
+        (sessionId: string) => {
+          const processingTime = (Date.now() - startTime) / 1000;
+
+          // 更新會話 ID
+          if (!state.sessionId) {
+            setState(prev => ({ ...prev, sessionId }));
+          }
+
+          // 完成，顯示處理時間
+          updateMessage(assistantMessageId, {
+            content: accumulatedContent + `\n\n*處理時間: ${processingTime.toFixed(2)}秒*`,
+            loading: false,
+            processing_time: processingTime,
+          });
+
+          setState(prev => ({ ...prev, isLoading: false }));
+          toast.success('分析完成！');
+        },
+        // onError: 錯誤處理
+        (error: string) => {
+          updateMessage(assistantMessageId, {
+            content: `❌ 抱歉，處理您的請求時發生錯誤：\n\n${error}\n\n請檢查網路連線或稍後再試。`,
+            loading: false,
+          });
+
+          setState(prev => ({
+            ...prev,
+            isLoading: false,
+            error
+          }));
+          toast.error(error);
+        }
+      );
+
+      // 保存 eventSource 以便需要時取消
+      // (可選：添加到 state 或 ref)
+
+    } catch (error) {
+      console.error('Stream query failed:', error);
+
+      const apiError = error as ApiError;
+      const errorMessage = formatApiError(apiError);
+
+      updateMessage(assistantMessageId, {
+        content: `❌ 抱歉，處理您的請求時發生錯誤：\n\n${errorMessage}`,
+        loading: false,
+      });
+
+      setState(prev => ({
+        ...prev,
+        isLoading: false,
+        error: errorMessage
+      }));
+      toast.error(errorMessage);
+    }
+  }, [state.userProfile, state.sessionId, state.messages, addMessage, updateMessage]);
 
   // 清除聊天記錄
   const clearChat = useCallback(async () => {
@@ -222,6 +335,7 @@ export const useChat = () => {
 
     // 動作
     sendQuery,
+    sendQueryStream,  // 流式查詢方法
     clearChat,
     retryLastMessage,
     updateUserProfile,
