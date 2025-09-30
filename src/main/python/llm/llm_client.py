@@ -52,7 +52,8 @@ class OpenAIClient(BaseLLMClient):
             raise ValueError("OpenAI API key not provided")
 
         self.model = model
-        self.client = openai.AsyncOpenAI(api_key=self.api_key)
+        # 使用同步 client 避免事件循環衝突
+        self.client = openai.OpenAI(api_key=self.api_key)
         self.logger = logging.getLogger(__name__)
 
     async def generate_response(self, prompt: str = None, messages: List[Dict[str, str]] = None, **kwargs) -> LLMResponse:
@@ -86,7 +87,11 @@ class OpenAIClient(BaseLLMClient):
                 raise ValueError("Either 'prompt' or 'messages' must be provided")
 
             self.logger.info(f"Calling OpenAI API with model={self.model}, messages={len(chat_messages)}, max_tokens={max_tokens}")
-            response = await self.client.chat.completions.create(
+
+            # 使用 to_thread 在線程池中運行同步調用，避免事件循環阻塞
+            import asyncio
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
                 model=self.model,
                 messages=chat_messages,
                 max_tokens=max_tokens,
