@@ -425,9 +425,16 @@ async def process_query_stream(request: QueryRequest):
                 # 發送完成事件
                 yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
             else:
-                # 降級到普通模式：一次性發送
+                # 降級到普通模式：模擬逐塊發送（提供流式體驗）
                 final_response = workflow_result.get("final_response", "")
-                yield f"data: {json.dumps({'type': 'content', 'content': final_response})}\n\n"
+
+                # 模擬逐塊發送 - 每次發送 3-5 個字元
+                chunk_size = 5
+                for i in range(0, len(final_response), chunk_size):
+                    chunk = final_response[i:i+chunk_size]
+                    yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
+                    # 模擬打字延遲（50ms）
+                    await asyncio.sleep(0.05)
 
                 # 保存到記憶
                 memory.add_message(
