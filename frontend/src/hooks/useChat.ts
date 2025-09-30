@@ -113,11 +113,21 @@ export const useChat = () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
 
     try {
+      // 構建對話歷史（排除當前查詢和載入訊息）
+      const conversationHistory = state.messages
+        .filter(msg => !msg.loading && msg.type !== 'system')  // 排除載入訊息和系統訊息
+        .map(msg => ({
+          role: msg.type as 'user' | 'assistant',
+          content: msg.content,
+          timestamp: msg.timestamp.toISOString()
+        }));
+
       // 準備 API 請求
       const request: QueryRequest = {
         query: query.trim(),
         user_profile: state.userProfile,
         session_id: state.sessionId || undefined,
+        conversation_history: conversationHistory.length > 0 ? conversationHistory : undefined,
       };
 
       // 發送 API 請求

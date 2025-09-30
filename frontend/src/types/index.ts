@@ -8,10 +8,17 @@ export interface UserProfile {
   financial_goals?: string[];
 }
 
+export interface ConversationHistoryItem {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp?: string;
+}
+
 export interface QueryRequest {
   query: string;
   user_profile: UserProfile;
   session_id?: string;
+  conversation_history?: ConversationHistoryItem[];
 }
 
 export interface ExpertResponse {
