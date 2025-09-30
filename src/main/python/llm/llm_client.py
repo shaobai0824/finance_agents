@@ -55,8 +55,15 @@ class OpenAIClient(BaseLLMClient):
         self.client = openai.AsyncOpenAI(api_key=self.api_key)
         self.logger = logging.getLogger(__name__)
 
-    async def generate_response(self, prompt: str, **kwargs) -> LLMResponse:
-        """生成 OpenAI 回應"""
+    async def generate_response(self, prompt: str = None, messages: List[Dict[str, str]] = None, **kwargs) -> LLMResponse:
+        """生成 OpenAI 回應
+
+        支援兩種調用方式：
+        1. 簡單模式：generate_response(prompt="your query")
+        2. 對話模式：generate_response(messages=[...])
+
+        Linus 實用主義：向後兼容，不破壞現有代碼
+        """
         import time
         start_time = time.time()
 
@@ -68,9 +75,19 @@ class OpenAIClient(BaseLLMClient):
             # 移除 model 參數以避免重複（使用實例初始化時的 model）
             api_kwargs.pop("model", None)
 
+            # 決定使用哪種模式
+            if messages:
+                # 對話模式：使用完整的 messages 列表
+                chat_messages = messages
+            elif prompt:
+                # 簡單模式：將 prompt 轉換為單個 user message
+                chat_messages = [{"role": "user", "content": prompt}]
+            else:
+                raise ValueError("Either 'prompt' or 'messages' must be provided")
+
             response = await self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=chat_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 **api_kwargs
@@ -231,9 +248,14 @@ class LLMManager:
 llm_manager = LLMManager()
 
 # 便利函數
-async def generate_llm_response(prompt: str, **kwargs) -> LLMResponse:
-    """便利函數 - 生成 LLM 回應"""
-    return await llm_manager.generate_response(prompt, **kwargs)
+async def generate_llm_response(prompt: str = None, messages: List[Dict[str, str]] = None, **kwargs) -> LLMResponse:
+    """便利函數 - 生成 LLM 回應
+
+    支援兩種模式：
+    1. generate_llm_response(prompt="query")
+    2. generate_llm_response(messages=[...])
+    """
+    return await llm_manager.generate_response(prompt=prompt, messages=messages, **kwargs)
 
 def is_llm_configured() -> bool:
     """檢查是否已配置 LLM（包括 Mock LLM）"""

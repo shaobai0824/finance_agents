@@ -133,13 +133,20 @@ class FinanceWorkflowLLM:
         # 編譯工作流程
         self.workflow = workflow.compile()
 
-    async def run(self, user_query: str, user_profile: Dict = None, session_id: str = None) -> Dict:
+    async def run(
+        self,
+        user_query: str,
+        user_profile: Dict = None,
+        session_id: str = None,
+        conversation_history: List[Dict[str, str]] = None
+    ) -> Dict:
         """執行理財諮詢工作流程
 
         Args:
             user_query: 使用者查詢
             user_profile: 使用者資料
             session_id: 會話 ID
+            conversation_history: 對話歷史（OpenAI 格式）
 
         Returns:
             完整的諮詢結果
@@ -148,16 +155,11 @@ class FinanceWorkflowLLM:
 
         try:
             # 初始化狀態
-            initial_state = FinanceState(
-                user_query=user_query,
-                user_profile=user_profile or {},
+            initial_state = self.state_manager.create_initial_state(
                 session_id=session_id,
-                status=WorkflowStatus.PROCESSING,
-                expert_responses={},
-                expert_sources={},
-                final_response="",
-                confidence_score=0.0,
-                processing_start_time=datetime.now()
+                user_query=user_query,
+                user_profile=user_profile,
+                conversation_history=conversation_history
             )
 
             logger.info(f"Starting query routing for session: {session_id}")
@@ -239,13 +241,19 @@ class FinanceWorkflowLLM:
             return state
 
     async def _process_experts(self, state: FinanceState) -> FinanceState:
-        """並行處理專家諮詢"""
+        """並行處理專家諮詢
+
+        Linus 實用主義：將對話歷史傳遞給所有專家
+        """
         try:
             required_experts = state["required_experts"]
             query = state["user_query"]
             user_profile = state["user_profile"]
+            conversation_history = state.get("conversation_history", [])
 
             logger.info(f"Processing experts for session: {state['session_id']}")
+            if conversation_history:
+                logger.info(f"Using conversation history with {len(conversation_history)} messages")
 
             # 準備專家任務
             expert_tasks = []
@@ -255,7 +263,10 @@ class FinanceWorkflowLLM:
                         agent_type=expert_type,
                         message_type=MessageType.QUERY,
                         content=query,
-                        metadata={"user_profile": user_profile}
+                        metadata={
+                            "user_profile": user_profile,
+                            "conversation_history": conversation_history  # 傳遞對話歷史
+                        }
                     )
                     task = self._process_single_expert(expert_type, message)
                     expert_tasks.append((expert_type, task))

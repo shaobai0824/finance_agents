@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 from ..workflow.finance_workflow_llm import FinanceWorkflowLLM
 from ..rag import ChromaVectorStore, KnowledgeRetriever
 from ..rag.enhanced_vector_store import EnhancedVectorStore
+from ..memory import ConversationMemory, MessageRole
 from .models import (ErrorResponse, HealthCheckResponse, QueryRequest,
                      QueryResponse, SessionInfo, WorkflowStatus)
 
@@ -40,6 +41,8 @@ finance_workflow = None
 vector_store = None
 knowledge_retriever = None
 active_sessions: Dict[str, Dict[str, Any]] = {}
+# 會話記憶管理
+session_memories: Dict[str, Any] = {}  # session_id -> ConversationMemory
 
 
 @asynccontextmanager
@@ -214,6 +217,7 @@ async def process_query(request: QueryRequest):
     - 清晰的輸入驗證
     - 結構化的錯誤處理
     - 完整的回應資訊
+    - 對話記憶管理
     """
     start_time = time.time()
     session_id = request.session_id or str(uuid.uuid4())
@@ -228,24 +232,70 @@ async def process_query(request: QueryRequest):
                 detail="理財諮詢服務尚未就緒，請稍後再試"
             )
 
+        # 管理對話記憶
+        if session_id not in session_memories:
+            # 首次查詢：建立新的 ConversationMemory
+            session_memories[session_id] = ConversationMemory(
+                session_id=session_id,
+                max_turns=10,
+                max_context_tokens=4000
+            )
+            logger.info(f"Created new conversation memory for session: {session_id}")
+
+        memory = session_memories[session_id]
+
+        # 從前端歷史恢復（如果有）
+        if request.conversation_history:
+            # 清空現有記憶並從前端歷史重建
+            memory.clear()
+            for hist_item in request.conversation_history:
+                role = MessageRole(hist_item.role)
+                memory.add_message(
+                    role=role,
+                    content=hist_item.content
+                )
+            logger.info(f"Restored {len(request.conversation_history)} messages from frontend")
+
+        # 添加當前使用者查詢到記憶
+        memory.add_message(
+            role=MessageRole.USER,
+            content=request.query
+        )
+
+        # 獲取格式化的對話歷史給 LLM
+        conversation_history = memory.get_context_for_llm(
+            include_system_prompt=False  # system prompt 由各 agent 自己加
+        )
+
         # 更新會話資訊
         active_sessions[session_id] = {
-            "created_at": datetime.now(),
+            "created_at": active_sessions.get(session_id, {}).get("created_at", datetime.now()),
             "last_activity": datetime.now(),
             "query_count": active_sessions.get(session_id, {}).get("query_count", 0) + 1,
             "status": "processing"
         }
 
-        # 執行理財諮詢工作流程
+        # 執行理財諮詢工作流程（傳入對話歷史）
         workflow_result = await finance_workflow.run(
             user_query=request.query,
             user_profile=request.user_profile,
-            session_id=session_id
+            session_id=session_id,
+            conversation_history=conversation_history
         )
 
         # 更新會話狀態
         active_sessions[session_id]["status"] = "completed"
         active_sessions[session_id]["last_activity"] = datetime.now()
+
+        # 儲存 AI 回應到記憶
+        final_response_text = workflow_result.get("final_response", "無法生成回應")
+        memory.add_message(
+            role=MessageRole.ASSISTANT,
+            content=final_response_text,
+            confidence=workflow_result.get("confidence_score", 0.0),
+            sources=workflow_result.get("response_sources", [])
+        )
+        logger.info(f"Saved AI response to memory, total turns: {memory.total_turns}")
 
         # 轉換專家回應格式
         expert_responses = []
@@ -265,7 +315,7 @@ async def process_query(request: QueryRequest):
         response = QueryResponse(
             session_id=session_id,
             query=request.query,
-            final_response=workflow_result.get("final_response", "無法生成回應"),
+            final_response=final_response_text,
             confidence_score=workflow_result.get("confidence_score", 0.0),
             expert_responses=expert_responses,
             sources=workflow_result.get("response_sources", []),
@@ -339,8 +389,17 @@ async def get_session_info(session_id: str):
 @app.delete("/session/{session_id}")
 async def delete_session(session_id: str):
     """刪除會話資料"""
+    deleted = False
+
     if session_id in active_sessions:
         del active_sessions[session_id]
+        deleted = True
+
+    if session_id in session_memories:
+        del session_memories[session_id]
+        deleted = True
+
+    if deleted:
         return {"message": f"會話 {session_id} 已刪除"}
     else:
         raise HTTPException(

@@ -163,6 +163,9 @@ class BaseAgent(ABC):
         try:
             query = message.content.strip()
 
+            # 提取對話歷史（如果有）
+            conversation_history = message.metadata.get("conversation_history", [])
+
             # 1. RAG 檢索相關資訊
             knowledge_results = []
             if self.use_rag and self.knowledge_retriever:
@@ -174,8 +177,8 @@ class BaseAgent(ABC):
             # 3. 構建專業提示詞
             prompt = await self._build_prompt(query, knowledge_results, personal_context)
 
-            # 4. 使用 LLM 生成回應
-            response_content = await self._generate_llm_response(prompt)
+            # 4. 使用 LLM 生成回應（傳入對話歷史）
+            response_content = await self._generate_llm_response(prompt, conversation_history)
 
             # 5. 後處理回應
             final_content = self._post_process_response(response_content)
@@ -253,15 +256,47 @@ class BaseAgent(ABC):
             self.logger.error(f"Error getting personal context: {e}")
             return {}
 
-    async def _generate_llm_response(self, prompt: str) -> str:
-        """使用 LLM 生成回應"""
+    async def _generate_llm_response(
+        self,
+        prompt: str,
+        conversation_history: List[Dict[str, str]] = None
+    ) -> str:
+        """使用 LLM 生成回應
+
+        Args:
+            prompt: 當前查詢的提示詞
+            conversation_history: 對話歷史（OpenAI 格式）
+
+        Linus 實用主義：直接使用 OpenAI messages 格式，無額外轉換
+        """
         if not is_llm_configured():
             self.logger.warning("No LLM client available, using fallback response")
             return await self._generate_fallback_response(prompt)
 
         try:
+            # 構建完整的 messages
+            messages = []
+
+            # 1. 添加系統提示
+            messages.append({
+                "role": "system",
+                "content": self.system_prompt
+            })
+
+            # 2. 添加對話歷史（如果有）
+            if conversation_history:
+                messages.extend(conversation_history)
+                self.logger.info(f"Using {len(conversation_history)} historical messages")
+
+            # 3. 添加當前查詢
+            messages.append({
+                "role": "user",
+                "content": prompt
+            })
+
+            # 使用 messages 格式呼叫 LLM
             response = await generate_llm_response(
-                prompt=prompt,
+                messages=messages,
                 **self.llm_config
             )
             return response.content
