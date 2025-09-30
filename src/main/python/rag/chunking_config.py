@@ -8,7 +8,7 @@ import os
 import json
 import yaml
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 from dataclasses import dataclass, asdict
 import logging
 
@@ -66,11 +66,23 @@ class FinancialOptimizationConfig:
 @dataclass
 class SemanticChunkingConfig:
     """完整的語意切割配置"""
-    embedding: EmbeddingConfig = EmbeddingConfig()
-    chunk_size: ChunkSizeConfig = ChunkSizeConfig()
-    boundary: BoundaryConfig = BoundaryConfig()
-    overlap: OverlapConfig = OverlapConfig()
-    financial: FinancialOptimizationConfig = FinancialOptimizationConfig()
+    embedding: EmbeddingConfig = None
+    chunk_size: ChunkSizeConfig = None
+    boundary: BoundaryConfig = None
+    overlap: OverlapConfig = None
+    financial: FinancialOptimizationConfig = None
+
+    def __post_init__(self):
+        if self.embedding is None:
+            self.embedding = EmbeddingConfig()
+        if self.chunk_size is None:
+            self.chunk_size = ChunkSizeConfig()
+        if self.boundary is None:
+            self.boundary = BoundaryConfig()
+        if self.overlap is None:
+            self.overlap = OverlapConfig()
+        if self.financial is None:
+            self.financial = FinancialOptimizationConfig()
 
     # 全域設定
     enable_logging: bool = True

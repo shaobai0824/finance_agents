@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 
 from ..workflow.finance_workflow_llm import FinanceWorkflowLLM
 from ..rag import ChromaVectorStore, KnowledgeRetriever
+from ..rag.enhanced_vector_store import EnhancedVectorStore
 from .models import (ErrorResponse, HealthCheckResponse, QueryRequest,
                      QueryResponse, SessionInfo, WorkflowStatus)
 
@@ -55,9 +56,13 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("Starting Finance Agents API...")
 
-        # 初始化 ChromaDB 向量存儲 (使用最佳策略集合)
-        logger.info("Initializing ChromaDB vector store...")
-        vector_store = ChromaVectorStore(collection_name="finance_knowledge_optimal")
+        # 初始化增強型向量存儲 (文章感知RAG)
+        logger.info("Initializing Enhanced Vector Store with semantic chunking...")
+        vector_store = EnhancedVectorStore(
+            collection_name="finance_knowledge_enhanced",
+            enable_semantic_chunking=True,
+            fallback_to_legacy=True
+        )
 
         # 初始化知識檢索器
         logger.info("Initializing knowledge retriever...")

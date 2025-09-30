@@ -15,6 +15,14 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .chroma_vector_store import ChromaVectorStore
+from typing import Union
+
+# 為了支援 EnhancedVectorStore，我們使用Union類型
+try:
+    from .enhanced_vector_store import EnhancedVectorStore
+    VectorStore = Union[ChromaVectorStore, EnhancedVectorStore]
+except ImportError:
+    VectorStore = ChromaVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +69,7 @@ class KnowledgeRetriever:
     為不同的理財專家提供專業知識檢索服務
     """
 
-    def __init__(self, vector_store: ChromaVectorStore):
+    def __init__(self, vector_store: VectorStore):
         self.vector_store = vector_store
         self.logger = logging.getLogger(f"{__name__}.KnowledgeRetriever")
 

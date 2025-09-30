@@ -25,7 +25,7 @@ class ChromaVectorStore:
     提供簡潔的向量存儲操作介面
     """
 
-    def __init__(self, persist_directory: Optional[str] = None, collection_name: str = "finance_knowledge"):
+    def __init__(self, persist_directory: Optional[str] = None, collection_name: str = "finance_knowledge_optimal"):
         """初始化 ChromaDB 客戶端
 
         Args:
@@ -262,11 +262,13 @@ class ChromaVectorStore:
         """生成文件 ID
 
         Linus 哲學：簡潔執念
-        - 基於內容的 hash，確保唯一性
-        - 可重現的 ID 生成
+        - 基於內容的 hash + 時間戳，確保唯一性
+        - 避免 hash 衝突
         """
+        import time
         hash_object = hashlib.md5(document.encode())
-        return f"doc_{hash_object.hexdigest()[:12]}"
+        timestamp = str(int(time.time() * 1000000))  # 微秒級時間戳
+        return f"doc_{hash_object.hexdigest()[:8]}_{timestamp[-8:]}"
 
     def clear_collection(self):
         """清空集合（謹慎使用）"""
