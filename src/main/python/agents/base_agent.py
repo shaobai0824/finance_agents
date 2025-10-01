@@ -126,6 +126,7 @@ class BaseAgent(ABC):
         self.knowledge_retriever = knowledge_retriever
         self.personal_db = personal_db
         self.logger = logging.getLogger(f"{__name__}.{name}")
+        self.last_retrieved_docs = []  # 儲存最後檢索的 RAG 文件
 
         # LLM 配置
         self.llm_config = {
@@ -237,6 +238,8 @@ class BaseAgent(ABC):
             knowledge_results = []
             if self.use_rag and self.knowledge_retriever:
                 knowledge_results = await self._retrieve_knowledge(query, max_results=8)
+                # 儲存最後檢索的文件，供外部訪問
+                self.last_retrieved_docs = knowledge_results
 
             # 2. 查詢個人資料庫（快速）
             personal_context = await self._get_personal_context(query)
@@ -392,11 +395,16 @@ class BaseAgent(ABC):
             # 導入 LLM manager 的流式方法
             from ..llm import llm_manager
 
-            if not llm_manager or not llm_manager.current_client:
+            if not llm_manager or not llm_manager.default_client:
                 raise Exception("LLM client not available")
 
+            # 獲取默認客戶端
+            client = llm_manager.clients.get(llm_manager.default_client)
+            if not client:
+                raise Exception(f"LLM client '{llm_manager.default_client}' not found")
+
             # 調用流式生成方法
-            async for chunk in llm_manager.current_client.generate_response_stream(
+            async for chunk in client.generate_response_stream(
                 messages=messages,
                 **self.llm_config
             ):

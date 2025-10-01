@@ -43,7 +43,7 @@ class ConversationHistoryItem(BaseModel):
 class QueryRequest(BaseModel):
     """諮詢請求模型
 
-    Linus Never break userspace：conversation_history 是可選的，舊版前端仍可正常運作
+    Linus Never break userspace：conversation_history 和 debug 是可選的，舊版前端仍可正常運作
     """
     query: str = Field(..., description="使用者查詢內容", min_length=1, max_length=1000)
     user_profile: Optional[Dict[str, Any]] = Field(None, description="使用者資料")
@@ -52,6 +52,7 @@ class QueryRequest(BaseModel):
         None,
         description="對話歷史（可選）"
     )
+    debug: Optional[bool] = Field(False, description="啟用 debug 模式，返回 RAG 檢索詳情")
 
     @validator('query')
     def validate_query(cls, v):

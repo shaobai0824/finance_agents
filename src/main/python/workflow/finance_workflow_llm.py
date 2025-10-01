@@ -533,6 +533,8 @@ class FinanceWorkflowLLM:
 
             # 步驟 2: 流式處理專家回應
             # 策略：依序處理每個專家，並即時流式輸出
+            all_rag_docs = []  # 收集所有專家的 RAG 檢索結果
+
             for expert_type in required_experts:
                 if expert_type not in self.experts:
                     continue
@@ -557,6 +559,10 @@ class FinanceWorkflowLLM:
                     logger.info(f"[Stream] Using stream mode for {expert_type.value}")
                     async for chunk in expert.process_message_stream(message):
                         yield chunk
+
+                    # 收集 RAG 檢索結果
+                    if hasattr(expert, 'last_retrieved_docs') and expert.last_retrieved_docs:
+                        all_rag_docs.extend(expert.last_retrieved_docs)
                 else:
                     # 降級到普通模式（無超時限制，讓 LLM 自然完成）
                     logger.info(f"[Stream] Falling back to normal mode for {expert_type.value}")
@@ -572,6 +578,37 @@ class FinanceWorkflowLLM:
                 # 如果有多個專家，在專家之間添加分隔
                 if len(required_experts) > 1 and expert_type != required_experts[-1]:
                     yield "\n\n---\n\n"
+
+            # 步驟 3: 在回應末尾附加 RAG 來源文件
+            if all_rag_docs:
+                yield "\n\n---\n\n### 📚 參考資料來源\n\n"
+                for idx, doc in enumerate(all_rag_docs[:5], 1):  # 最多顯示 5 個來源
+                    # RAG 文件是 RetrievalResult dataclass 物件
+                    # 屬性: content, metadata, similarity_score, source, expert_domain, confidence
+                    metadata = doc.metadata if hasattr(doc, 'metadata') else {}
+
+                    title = metadata.get('title', '未知標題')
+                    category = metadata.get('category', '未分類')
+                    url = metadata.get('url', '')
+
+                    # 使用 scrape_time 作為時間（原始資料沒有 publish_time）
+                    scrape_time = metadata.get('scrape_time', '')
+                    if scrape_time:
+                        # 格式化時間：從 "2025-09-27T13:21:14.501841" 提取 "2025-09-27"
+                        time_display = scrape_time.split('T')[0] if 'T' in scrape_time else scrape_time
+                    else:
+                        time_display = '--'
+
+                    # source 是 dataclass 的直接屬性
+                    source = doc.source if hasattr(doc, 'source') else metadata.get('source', '未知來源')
+
+                    yield f"**{idx}. {title}**\n"
+                    yield f"   - 📂 分類：{category}\n"
+                    yield f"   - 📅 資料時間：{time_display}\n"
+                    yield f"   - 🌐 來源：{source}\n"
+                    if url:
+                        yield f"   - 🔗 [查看原文]({url})\n"
+                    yield "\n"
 
             logger.info(f"[Stream] Completed for session: {session_id}")
 
