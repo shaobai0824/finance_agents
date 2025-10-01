@@ -581,11 +581,19 @@ class FinanceWorkflowLLM:
 
             # 步驟 3: 在回應末尾附加 RAG 來源文件
             if all_rag_docs:
-                yield "\n\n---\n\n### 📚 參考資料來源\n\n"
+                yield "\n\n---\n\n### 參考資料來源\n\n"
                 for idx, doc in enumerate(all_rag_docs[:5], 1):  # 最多顯示 5 個來源
-                    # RAG 文件是 RetrievalResult dataclass 物件
-                    # 屬性: content, metadata, similarity_score, source, expert_domain, confidence
-                    metadata = doc.metadata if hasattr(doc, 'metadata') else {}
+                    # RAG 文件可能是 dict（通過 to_dict() 轉換）或 RetrievalResult dataclass
+                    # 統一處理：優先嘗試 dataclass 屬性，否則當作 dict
+
+                    if isinstance(doc, dict):
+                        # doc 是 dict，直接取值
+                        metadata = doc.get('metadata', {})
+                        source = doc.get('source', '未知來源')
+                    else:
+                        # doc 是 RetrievalResult dataclass
+                        metadata = doc.metadata if hasattr(doc, 'metadata') else {}
+                        source = doc.source if hasattr(doc, 'source') else '未知來源'
 
                     title = metadata.get('title', '未知標題')
                     category = metadata.get('category', '未分類')
@@ -599,15 +607,12 @@ class FinanceWorkflowLLM:
                     else:
                         time_display = '--'
 
-                    # source 是 dataclass 的直接屬性
-                    source = doc.source if hasattr(doc, 'source') else metadata.get('source', '未知來源')
-
                     yield f"**{idx}. {title}**\n"
-                    yield f"   - 📂 分類：{category}\n"
-                    yield f"   - 📅 資料時間：{time_display}\n"
-                    yield f"   - 🌐 來源：{source}\n"
+                    yield f"   - 分類：{category}\n"
+                    yield f"   - 資料時間：{time_display}\n"
+                    yield f"   - 來源：{source}\n"
                     if url:
-                        yield f"   - 🔗 [查看原文]({url})\n"
+                        yield f"   - [查看原文]({url})\n"
                     yield "\n"
 
             logger.info(f"[Stream] Completed for session: {session_id}")
