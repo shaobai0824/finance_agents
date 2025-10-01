@@ -389,57 +389,27 @@ async def process_query_stream(request: QueryRequest):
             # 發送開始事件
             yield f"data: {json.dumps({'type': 'start', 'session_id': session_id})}\n\n"
 
-            # 執行工作流程
-            # 注意：workflow 目前不支援真正的流式，我們會在 API 層模擬流式發送
-            workflow_result = await finance_workflow.run(
+            # 執行工作流程（使用真正的流式處理）
+            # 使用 run_stream() 方法獲得逐塊生成的回應
+            full_content = ""
+            async for chunk in finance_workflow.run_stream(
                 user_query=request.query,
                 user_profile=request.user_profile,
                 session_id=session_id,
                 conversation_history=conversation_history
+            ):
+                full_content += chunk
+                yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
+
+            # 保存完整回應到記憶
+            memory.add_message(
+                role=MessageRole.ASSISTANT,
+                content=full_content,
+                confidence=0.5  # 流式模式下暫時使用固定信心度
             )
 
-            # 檢查是否為 async generator（流式）
-            if hasattr(workflow_result, '__aiter__'):
-                # 流式模式：逐塊發送
-                full_content = ""
-                async for chunk in workflow_result:
-                    if isinstance(chunk, dict) and 'content' in chunk:
-                        content_piece = chunk['content']
-                        full_content += content_piece
-                        yield f"data: {json.dumps({'type': 'content', 'content': content_piece})}\n\n"
-                    elif isinstance(chunk, str):
-                        full_content += chunk
-                        yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
-
-                # 保存完整回應到記憶
-                memory.add_message(
-                    role=MessageRole.ASSISTANT,
-                    content=full_content,
-                    confidence=0.5
-                )
-
-                # 發送完成事件
-                yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
-            else:
-                # 降級到普通模式：模擬逐塊發送（提供流式體驗）
-                final_response = workflow_result.get("final_response", "")
-
-                # 模擬逐塊發送 - 每次發送 3-5 個字元
-                chunk_size = 5
-                for i in range(0, len(final_response), chunk_size):
-                    chunk = final_response[i:i+chunk_size]
-                    yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
-                    # 模擬打字延遲（50ms）
-                    await asyncio.sleep(0.05)
-
-                # 保存到記憶
-                memory.add_message(
-                    role=MessageRole.ASSISTANT,
-                    content=final_response,
-                    confidence=workflow_result.get("confidence_score", 0.0)
-                )
-
-                yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+            # 發送完成事件
+            yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
 
             logger.info(f"Streaming query completed for session: {session_id}")
 

@@ -476,3 +476,110 @@ class FinanceWorkflowLLM:
             "personal_db": bool(self.personal_db),
             "active_sessions": len(self.state_manager.session_id)
         }
+
+    async def run_stream(
+        self,
+        user_query: str,
+        user_profile: Dict = None,
+        session_id: str = None,
+        conversation_history: List[Dict[str, str]] = None
+    ):
+        """執行理財諮詢工作流程（流式模式）
+
+        這個方法繞過 LangGraph，直接進行流式處理，讓用戶更快看到第一個回應
+
+        Args:
+            user_query: 使用者查詢
+            user_profile: 使用者資料
+            session_id: 會話 ID
+            conversation_history: 對話歷史
+
+        Yields:
+            str: 逐塊生成的回應內容
+        """
+        session_id = session_id or str(uuid.uuid4())
+
+        try:
+            # 步驟 1: 路由決策（快速，1-2秒）
+            logger.info(f"[Stream] Starting routing for session: {session_id}")
+            routing_message = AgentMessage(
+                agent_type=AgentType.MANAGER,
+                message_type=MessageType.QUERY,
+                content=user_query
+            )
+
+            routing_response = await asyncio.wait_for(
+                self.manager_agent.process_message(routing_message),
+                timeout=10.0
+            )
+
+            # 獲取需要的專家
+            if routing_response.metadata and "required_experts" in routing_response.metadata:
+                expert_names = routing_response.metadata["required_experts"]
+            else:
+                expert_names = ["financial_planner"]
+
+            # 轉換為 AgentType
+            required_experts = []
+            for name in expert_names:
+                if name == "financial_planner":
+                    required_experts.append(AgentType.FINANCIAL_PLANNER)
+                elif name == "financial_analyst":
+                    required_experts.append(AgentType.FINANCIAL_ANALYST)
+                elif name == "legal_expert":
+                    required_experts.append(AgentType.LEGAL_EXPERT)
+
+            logger.info(f"[Stream] Experts required: {[e.value for e in required_experts]}")
+
+            # 步驟 2: 流式處理專家回應
+            # 策略：依序處理每個專家，並即時流式輸出
+            for expert_type in required_experts:
+                if expert_type not in self.experts:
+                    continue
+
+                expert = self.experts[expert_type]
+                logger.info(f"[Stream] Processing expert: {expert_type.value}")
+
+                # 準備訊息
+                message = AgentMessage(
+                    agent_type=expert_type,
+                    message_type=MessageType.QUERY,
+                    content=user_query,
+                    metadata={
+                        "user_profile": user_profile or {},
+                        "conversation_history": conversation_history or []
+                    }
+                )
+
+                # 檢查 expert 是否有流式方法
+                if hasattr(expert, 'process_message_stream'):
+                    # 使用流式處理
+                    logger.info(f"[Stream] Using stream mode for {expert_type.value}")
+                    async for chunk in expert.process_message_stream(message):
+                        yield chunk
+                else:
+                    # 降級到普通模式（無超時限制，讓 LLM 自然完成）
+                    logger.info(f"[Stream] Falling back to normal mode for {expert_type.value}")
+                    response = await expert.process_message(message)
+
+                    # 模擬流式輸出
+                    content = response.content
+                    chunk_size = 10
+                    for i in range(0, len(content), chunk_size):
+                        yield content[i:i+chunk_size]
+                        await asyncio.sleep(0.01)  # 10ms 延遲
+
+                # 如果有多個專家，在專家之間添加分隔
+                if len(required_experts) > 1 and expert_type != required_experts[-1]:
+                    yield "\n\n---\n\n"
+
+            logger.info(f"[Stream] Completed for session: {session_id}")
+
+        except asyncio.TimeoutError:
+            logger.error("[Stream] Processing timed out")
+            yield "抱歉，處理超時，請稍後再試。"
+        except Exception as e:
+            logger.error(f"[Stream] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"抱歉，處理時發生錯誤：{str(e)}"

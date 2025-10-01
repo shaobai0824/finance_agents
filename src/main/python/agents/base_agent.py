@@ -220,6 +220,38 @@ class BaseAgent(ABC):
                 metadata={"error_type": "processing_error"}
             )
 
+    async def process_message_stream(self, message: AgentMessage):
+        """處理訊息並流式輸出回應（真正的流式處理）
+
+        這是真正的流式處理實作，直接從 LLM 逐塊輸出，
+        讓使用者在 3-5 秒內看到第一個字，而不是等待 20 秒
+
+        Yields:
+            str: 逐塊生成的回應內容
+        """
+        try:
+            query = message.content.strip()
+            conversation_history = message.metadata.get("conversation_history", [])
+
+            # 1. RAG 檢索相關資訊（快速，1-2秒）
+            knowledge_results = []
+            if self.use_rag and self.knowledge_retriever:
+                knowledge_results = await self._retrieve_knowledge(query, max_results=8)
+
+            # 2. 查詢個人資料庫（快速）
+            personal_context = await self._get_personal_context(query)
+
+            # 3. 構建專業提示詞（快速）
+            prompt = await self._build_prompt(query, knowledge_results, personal_context)
+
+            # 4. 流式生成回應（這裡開始流式輸出，3-5 秒內第一個 token）
+            async for chunk in self._generate_llm_response_stream(prompt, conversation_history):
+                yield chunk
+
+        except Exception as e:
+            self.logger.error(f"Error in stream processing in {self.name}: {e}")
+            yield f"❌ 處理過程中發生錯誤：{str(e)}"
+
     @abstractmethod
     async def can_handle(self, query: str) -> float:
         """評估是否能處理特定查詢
@@ -306,6 +338,77 @@ class BaseAgent(ABC):
         except Exception as e:
             self.logger.error(f"LLM generation failed: {e}")
             return await self._generate_fallback_response(prompt)
+
+    async def _generate_llm_response_stream(
+        self,
+        prompt: str,
+        conversation_history: List[Dict[str, str]] = None
+    ):
+        """使用 LLM 生成流式回應（真正的流式處理）
+
+        這個方法會直接從 OpenAI API 逐塊接收 token，
+        讓使用者在 3-5 秒內看到第一個字，而不是等待完整回應
+
+        Args:
+            prompt: 當前查詢的提示詞
+            conversation_history: 對話歷史（OpenAI 格式）
+
+        Yields:
+            str: 逐塊生成的內容
+        """
+        if not is_llm_configured():
+            self.logger.warning("No LLM client available, using fallback response")
+            fallback = await self._generate_fallback_response(prompt)
+            # 模擬流式輸出降級回應
+            chunk_size = 10
+            for i in range(0, len(fallback), chunk_size):
+                yield fallback[i:i+chunk_size]
+            return
+
+        try:
+            # 構建完整的 messages（同普通模式）
+            messages = []
+
+            # 1. 添加系統提示
+            messages.append({
+                "role": "system",
+                "content": self.system_prompt
+            })
+
+            # 2. 添加對話歷史（如果有）
+            if conversation_history:
+                messages.extend(conversation_history)
+                self.logger.info(f"[Stream] Using {len(conversation_history)} historical messages")
+
+            # 3. 添加當前查詢
+            messages.append({
+                "role": "user",
+                "content": prompt
+            })
+
+            # 使用流式 API 呼叫 LLM
+            self.logger.info(f"[Stream] Calling LLM stream with {len(messages)} messages...")
+
+            # 導入 LLM manager 的流式方法
+            from ..llm import llm_manager
+
+            if not llm_manager or not llm_manager.current_client:
+                raise Exception("LLM client not available")
+
+            # 調用流式生成方法
+            async for chunk in llm_manager.current_client.generate_response_stream(
+                messages=messages,
+                **self.llm_config
+            ):
+                yield chunk
+
+            self.logger.info(f"[Stream] LLM stream completed")
+
+        except Exception as e:
+            self.logger.error(f"LLM stream generation failed: {e}")
+            # 錯誤時輸出降級訊息
+            fallback = await self._generate_fallback_response(prompt)
+            yield fallback
 
     async def _retrieve_knowledge(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """檢索相關知識（如果啟用 RAG）
