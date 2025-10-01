@@ -389,17 +389,13 @@ async def process_query_stream(request: QueryRequest):
             # 發送開始事件
             yield f"data: {json.dumps({'type': 'start', 'session_id': session_id})}\n\n"
 
-            # 執行工作流程（使用流式模式）
-            # 注意：需要修改 workflow 以支援流式
-            from ..workflow.finance_workflow_llm import FinanceWorkflowLLM
-
-            # 暫時使用普通模式，後續修改 workflow
+            # 執行工作流程
+            # 注意：workflow 目前不支援真正的流式，我們會在 API 層模擬流式發送
             workflow_result = await finance_workflow.run(
                 user_query=request.query,
                 user_profile=request.user_profile,
                 session_id=session_id,
-                conversation_history=conversation_history,
-                stream=True  # 啟用流式模式
+                conversation_history=conversation_history
             )
 
             # 檢查是否為 async generator（流式）
