@@ -211,7 +211,12 @@ class BaseScraper(ABC):
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument(f"--user-agent={self.session.headers['User-Agent']}")
 
-            self._driver = webdriver.Chrome(options=options)
+            # 使用 webdriver-manager 自動管理 ChromeDriver
+            from selenium.webdriver.chrome.service import Service
+            from webdriver_manager.chrome import ChromeDriverManager
+
+            service = Service(ChromeDriverManager().install())
+            self._driver = webdriver.Chrome(service=service, options=options)
 
         elif browser == "firefox":
             options = FirefoxOptions()

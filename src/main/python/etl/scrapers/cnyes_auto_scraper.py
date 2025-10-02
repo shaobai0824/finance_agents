@@ -129,35 +129,26 @@ class CnyesAutoScraper(BaseScraper):
         return self._parse_article_detail(url, content, category)
 
     def _parse_article_list(self, content: str) -> List[str]:
-        """解析文章清單頁面"""
+        """解析文章清單頁面
+
+        Linus 哲學：簡潔執念 - 直接找所有新聞連結，避免複雜的特殊情況
+        """
         soup = BeautifulSoup(content, 'html.parser')
         links = []
 
-        # 方法1: 尋找新聞清單容器
-        news_containers = soup.find_all(
-            'div',
-            class_=re.compile(r'.*news.*item.*|.*article.*item.*')
-        )
+        # 直接尋找所有包含 /news/id/ 的連結
+        news_links = soup.find_all('a', href=re.compile(r'/news/id/\d+'))
 
-        for container in news_containers:
-            link_element = container.find('a', href=re.compile(r'/news/id/'))
-            if link_element:
-                href = link_element.get('href')
-                if href:
-                    full_url = urljoin(self.base_url, href)
-                    links.append(full_url)
-
-        # 方法2: 直接尋找新聞連結
-        if not links:
-            news_links = soup.find_all('a', href=re.compile(r'/news/id/\d+'))
-            for link in news_links:
-                href = link.get('href')
-                if href:
-                    full_url = urljoin(self.base_url, href)
-                    links.append(full_url)
+        for link in news_links:
+            href = link.get('href')
+            if href:
+                full_url = urljoin(self.base_url, href)
+                links.append(full_url)
 
         # 去重並返回
-        return list(set(links))
+        unique_links = list(set(links))
+        self.logger.info(f"找到 {len(unique_links)} 個新聞連結")
+        return unique_links
 
     def _parse_article_detail(
         self,
@@ -205,47 +196,75 @@ class CnyesAutoScraper(BaseScraper):
         return article
 
     def _extract_title(self, soup: BeautifulSoup) -> Optional[str]:
-        """提取標題"""
-        title_selectors = [
-            'h1.title',
-            'h1[data-qa="article-title"]',
-            '.article-title h1',
-            'h1',
-            '.title'
-        ]
+        """提取標題
 
-        for selector in title_selectors:
-            title_element = soup.select_one(selector)
-            if title_element:
-                title = title_element.get_text().strip()
-                if title and len(title) > 5:
-                    return title
+        Linus 哲學：實用主義 - 找第一個 h1，大多數新聞網站都這樣設計
+        """
+        # 優先尋找 h1
+        h1 = soup.find('h1')
+        if h1:
+            title = h1.get_text().strip()
+            if title and len(title) > 5:
+                self.logger.debug(f"找到標題: {title[:50]}...")
+                return title
 
+        # 備用：從 meta og:title 提取
+        meta_title = soup.find('meta', property='og:title')
+        if meta_title and meta_title.get('content'):
+            title = meta_title['content'].strip()
+            if title and len(title) > 5:
+                self.logger.debug(f"從 meta 找到標題: {title[:50]}...")
+                return title
+
+        # 最後備用：從 title 標籤提取
+        title_tag = soup.find('title')
+        if title_tag:
+            title = title_tag.get_text().strip()
+            if title and len(title) > 5:
+                self.logger.debug(f"從 title 標籤找到: {title[:50]}...")
+                return title
+
+        self.logger.warning("無法找到標題")
         return None
 
     def _extract_content(self, soup: BeautifulSoup) -> Optional[str]:
-        """提取內容"""
-        content_selectors = [
-            '.article-content',
-            '.news-content',
-            '[data-qa="article-content"]',
-            '.content',
-            'article .content'
-        ]
+        """提取內容
 
-        for selector in content_selectors:
-            content_element = soup.select_one(selector)
-            if content_element:
-                # 移除廣告等不需要的元素
-                for unwanted in content_element.select(
-                    '.ad, .advertisement, .social-share, .related-news'
-                ):
-                    unwanted.decompose()
+        Linus 哲學：好品味 - 優先使用標準標籤，沒有特殊情況
+        """
+        # 方法1：找 article 標籤
+        article = soup.find('article')
+        if article:
+            # 移除不需要的元素
+            for unwanted in article.select('.ad, .advertisement, .social-share, .related-news, script, style'):
+                unwanted.decompose()
 
-                content_text = extract_text_from_html(str(content_element))
-                if content_text and len(content_text) > 100:
-                    return content_text
+            content_text = extract_text_from_html(str(article))
+            if content_text and len(content_text) > 100:
+                self.logger.debug(f"從 article 標籤提取內容：{len(content_text)} 字符")
+                return content_text
 
+        # 方法2：找包含 'content' 的 div
+        content_divs = soup.find_all('div', class_=re.compile(r'.*content.*', re.I))
+        for div in content_divs:
+            # 移除不需要的元素
+            for unwanted in div.select('.ad, .advertisement, .social-share, .related-news, script, style'):
+                unwanted.decompose()
+
+            content_text = extract_text_from_html(str(div))
+            if content_text and len(content_text) > 100:
+                self.logger.debug(f"從 content div 提取內容：{len(content_text)} 字符")
+                return content_text
+
+        # 方法3：從所有 <p> 標籤提取
+        paragraphs = soup.find_all('p')
+        if paragraphs:
+            combined_text = '\n'.join([p.get_text().strip() for p in paragraphs if p.get_text().strip()])
+            if combined_text and len(combined_text) > 100:
+                self.logger.debug(f"從 p 標籤提取內容：{len(combined_text)} 字符")
+                return combined_text
+
+        self.logger.warning("無法找到文章內容")
         return None
 
     def _extract_publish_date(self, soup: BeautifulSoup) -> Optional[datetime]:

@@ -165,21 +165,22 @@ def prepare_documents_and_metadata(
             ).hexdigest()[:12]
 
             # 為每個 chunk 準備元數據
+            # Linus 哲學：實用主義 - ChromaDB 不接受 None，全部轉為空字串
             metadata = {
-                "title": title,
-                "category": category,
-                "url": url,
-                "source": article.get('source_website', 'cnyes.com'),
-                "scrape_time": article.get('scraped_at', ''),
-                "publish_date": article.get('publish_date', ''),
-                "author": article.get('author', ''),
+                "title": title or '',
+                "category": category or '',
+                "url": url or '',
+                "source": article.get('source_website') or 'cnyes.com',
+                "scrape_time": article.get('scraped_at') or '',
+                "publish_date": article.get('publish_date') or '',
+                "author": article.get('author') or '',
                 "article_index": i,
                 "chunk_index": j + 1,
                 "total_chunks": len(chunks),
                 "chunk_id": f"article_{i}_chunk_{j+1}",
                 "unique_id": unique_id,
-                "content_hash": content_hash,  # 保存原文 hash 用於去重
-                "expert_domain": article.get('expert_domain', 'financial_analysis'),
+                "content_hash": content_hash or '',  # 保存原文 hash 用於去重
+                "expert_domain": article.get('expert_domain') or 'financial_analysis',
                 "chunk_type": determine_chunk_type(j, len(chunks)),
                 "chunk_length": len(chunk),
                 "strategy": "optimal_sentence_aware"
