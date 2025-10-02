@@ -5,11 +5,12 @@
 """
 
 from .law_moj_scraper import LawMojScraper, scrape as law_moj_scrape
-from .cnyes_scraper import CnyesScraper, scrape as cnyes_scrape
+# 舊的 cnyes_scraper.py 有編碼問題，已由 cnyes_auto_scraper.py 替代
+from .cnyes_auto_scraper import CnyesAutoScraper, scrape as cnyes_auto_scrape
 
 __all__ = [
     "LawMojScraper",
-    "CnyesScraper",
+    "CnyesAutoScraper",
     "law_moj_scrape",
-    "cnyes_scrape"
+    "cnyes_auto_scrape"
 ]

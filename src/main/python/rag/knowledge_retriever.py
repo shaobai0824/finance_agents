@@ -94,7 +94,7 @@ class KnowledgeRetriever:
         query: str,
         expert_domain: ExpertDomain,
         max_results: int = 5,
-        similarity_threshold: float = 0.3
+        similarity_threshold: float = 0.35  # 平衡設定：既過濾低相關內容，又不會太嚴格
     ) -> List[RetrievalResult]:
         """為特定專家檢索相關知識
 
@@ -122,13 +122,29 @@ class KnowledgeRetriever:
                 max_results=max_results * 2  # 搜尋更多結果以供篩選
             )
 
-            # 轉換為結構化結果
+            # 轉換為結構化結果（去重）
             retrieval_results = []
-            for result in search_results[:max_results]:
+            seen_sources = set()  # 追蹤已見過的來源，避免重複
+
+            for result in search_results:
+                # 提取來源標識（使用 article_id 或 source）
+                metadata = result.get("metadata", {})
+                source_id = metadata.get("article_id") or metadata.get("source", "")
+
+                # 跳過重複來源
+                if source_id in seen_sources:
+                    continue
+
+                seen_sources.add(source_id)
+
                 retrieval_result = self._create_retrieval_result(
                     result, expert_domain, query
                 )
                 retrieval_results.append(retrieval_result)
+
+                # 達到最大結果數就停止
+                if len(retrieval_results) >= max_results:
+                    break
 
             self.logger.info(
                 f"Retrieved {len(retrieval_results)} results for {expert_domain.value} expert"

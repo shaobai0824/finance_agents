@@ -150,8 +150,16 @@ class BaseAgent(ABC):
     async def _build_prompt(self,
                           query: str,
                           knowledge_results: List[Dict],
-                          personal_context: Dict[str, Any]) -> str:
-        """構建專業提示詞 - 每個 Agent 需要實現"""
+                          personal_context: Dict[str, Any],
+                          user_profile: Dict[str, Any] = None) -> str:
+        """構建專業提示詞 - 每個 Agent 需要實現
+
+        Args:
+            query: 使用者查詢
+            knowledge_results: RAG 檢索結果
+            personal_context: 從資料庫查詢的個人財務上下文
+            user_profile: 使用者提供的個人資料 (age, risk_tolerance, etc.)
+        """
         pass
 
     @abstractmethod
@@ -167,6 +175,9 @@ class BaseAgent(ABC):
             # 提取對話歷史（如果有）
             conversation_history = message.metadata.get("conversation_history", [])
 
+            # 提取使用者個人資料（從 API 傳入）
+            user_profile = message.metadata.get("user_profile")
+
             # 1. RAG 檢索相關資訊
             knowledge_results = []
             if self.use_rag and self.knowledge_retriever:
@@ -175,8 +186,8 @@ class BaseAgent(ABC):
             # 2. 查詢個人資料庫（如果需要）
             personal_context = await self._get_personal_context(query)
 
-            # 3. 構建專業提示詞
-            prompt = await self._build_prompt(query, knowledge_results, personal_context)
+            # 3. 構建專業提示詞（傳入 user_profile）
+            prompt = await self._build_prompt(query, knowledge_results, personal_context, user_profile)
 
             # 4. 使用 LLM 生成回應（傳入對話歷史）
             response_content = await self._generate_llm_response(prompt, conversation_history)
@@ -233,6 +244,7 @@ class BaseAgent(ABC):
         try:
             query = message.content.strip()
             conversation_history = message.metadata.get("conversation_history", [])
+            user_profile = message.metadata.get("user_profile")
 
             # 1. RAG 檢索相關資訊（快速，1-2秒）
             knowledge_results = []
@@ -244,8 +256,8 @@ class BaseAgent(ABC):
             # 2. 查詢個人資料庫（快速）
             personal_context = await self._get_personal_context(query)
 
-            # 3. 構建專業提示詞（快速）
-            prompt = await self._build_prompt(query, knowledge_results, personal_context)
+            # 3. 構建專業提示詞（快速，傳入 user_profile）
+            prompt = await self._build_prompt(query, knowledge_results, personal_context, user_profile)
 
             # 4. 流式生成回應（這裡開始流式輸出，3-5 秒內第一個 token）
             async for chunk in self._generate_llm_response_stream(prompt, conversation_history):
@@ -457,7 +469,20 @@ class BaseAgent(ABC):
                     max_results=max_results
                 )
 
-                return [result.to_dict() for result in results]
+                # 信心度過濾：只保留相似度 >= 0.25 的結果（平衡設定）
+                MIN_CONFIDENCE_THRESHOLD = 0.25
+                filtered_results = [
+                    result for result in results
+                    if result.confidence >= MIN_CONFIDENCE_THRESHOLD
+                ]
+
+                if len(filtered_results) < len(results):
+                    self.logger.info(
+                        f"Filtered out {len(results) - len(filtered_results)} low-confidence results "
+                        f"(threshold: {MIN_CONFIDENCE_THRESHOLD})"
+                    )
+
+                return [result.to_dict() for result in filtered_results]
 
         except Exception as e:
             self.logger.warning(f"知識檢索失敗: {e}")
