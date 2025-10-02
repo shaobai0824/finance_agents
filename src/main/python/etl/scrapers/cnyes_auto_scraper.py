@@ -40,16 +40,16 @@ class CnyesAutoScraper(BaseScraper):
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        self.base_url = "https://news.cnyes.com"
+        self.base_url = "https://m.cnyes.com"
 
-        # 所有支援的分類（依用戶需求）
+        # 所有支援的分類（手機版 URL，依用戶需求）
         self.news_categories = {
-            "台股": "https://news.cnyes.com/news/cat/tw_stock",
-            "美股": "https://news.cnyes.com/news/cat/us_stock",
-            "科技": "https://news.cnyes.com/news/cat/tech",
-            "基金": "https://news.cnyes.com/news/cat/fund",
-            "外匯": "https://news.cnyes.com/news/cat/forex",
-            "期貨": "https://news.cnyes.com/news/cat/futures"
+            "台股": "https://m.cnyes.com/news/cat/tw_stock",
+            "美股": "https://m.cnyes.com/news/cat/wd_stock",
+            "科技": "https://m.cnyes.com/news/cat/tech",
+            "基金": "https://m.cnyes.com/news/cat/fund",
+            "外匯": "https://m.cnyes.com/news/cat/forex",
+            "理財": "https://m.cnyes.com/news/cat/tw_money"
         }
 
         # 每個分類爬取的新聞數量
@@ -106,61 +106,96 @@ class CnyesAutoScraper(BaseScraper):
         if not content:
             return articles
 
-        # 解析文章清單
-        news_links = self._parse_article_list(content)
+        # 解析文章清單（返回包含 url 和 title 的字典列表）
+        news_items = self._parse_article_list(content)
 
         # 限制爬取數量
-        for link in news_links[:self.articles_per_category]:
+        for item in news_items[:self.articles_per_category]:
             try:
-                article = self._scrape_news_article(link, category_name)
+                article = self._scrape_news_article(
+                    item['url'],
+                    category_name,
+                    preloaded_title=item.get('title')
+                )
                 if article:
                     articles.append(article)
             except Exception as e:
-                self.logger.warning(f"爬取文章失敗 {link}: {e}")
+                self.logger.warning(f"爬取文章失敗 {item['url']}: {e}")
 
         return articles
 
-    def _scrape_news_article(self, url: str, category: str) -> Optional[ScrapedArticle]:
+    def _scrape_news_article(
+        self,
+        url: str,
+        category: str,
+        preloaded_title: Optional[str] = None
+    ) -> Optional[ScrapedArticle]:
         """爬取單篇新聞"""
         content = self.get_page_content(url)
         if not content:
             return None
 
-        return self._parse_article_detail(url, content, category)
+        return self._parse_article_detail(url, content, category, preloaded_title)
 
-    def _parse_article_list(self, content: str) -> List[str]:
-        """解析文章清單頁面
+    def _parse_article_list(self, content: str) -> List[Dict[str, str]]:
+        """解析文章清單頁面（手機版）
 
-        Linus 哲學：簡潔執念 - 直接找所有新聞連結，避免複雜的特殊情況
+        Linus 哲學：簡潔執念 - 從 <a> 標籤的 title 屬性提取標題
+
+        Returns:
+            包含 url 和 title 的字典列表
         """
         soup = BeautifulSoup(content, 'html.parser')
-        links = []
+        articles = []
+        seen_urls = set()
 
-        # 直接尋找所有包含 /news/id/ 的連結
-        news_links = soup.find_all('a', href=re.compile(r'/news/id/\d+'))
+        # 方法1：優先尋找有 title 屬性的 <a> 標籤（手機版特徵）
+        news_links_with_title = soup.find_all('a', attrs={'title': True, 'href': re.compile(r'/news/id/\d+')})
 
-        for link in news_links:
+        for link in news_links_with_title:
             href = link.get('href')
-            if href:
-                full_url = urljoin(self.base_url, href)
-                links.append(full_url)
+            title = link.get('title', '').strip()
 
-        # 去重並返回
-        unique_links = list(set(links))
-        self.logger.info(f"找到 {len(unique_links)} 個新聞連結")
-        return unique_links
+            if href and title and len(title) > 5:
+                full_url = urljoin(self.base_url, href)
+
+                # 去重
+                if full_url not in seen_urls:
+                    articles.append({
+                        'url': full_url,
+                        'title': title
+                    })
+                    seen_urls.add(full_url)
+
+        # 方法2：若方法1沒找到，嘗試一般連結
+        if not articles:
+            news_links = soup.find_all('a', href=re.compile(r'/news/id/\d+'))
+            for link in news_links:
+                href = link.get('href')
+                if href:
+                    full_url = urljoin(self.base_url, href)
+                    if full_url not in seen_urls:
+                        articles.append({
+                            'url': full_url,
+                            'title': None  # 稍後從詳細頁面提取
+                        })
+                        seen_urls.add(full_url)
+
+        self.logger.info(f"找到 {len(articles)} 個新聞連結 ({sum(1 for a in articles if a['title'])} 個含標題)")
+        return articles
 
     def _parse_article_detail(
         self,
         url: str,
         content: str,
-        category: str = ""
+        category: str = "",
+        preloaded_title: Optional[str] = None
     ) -> Optional[ScrapedArticle]:
         """解析文章詳細頁面"""
         soup = BeautifulSoup(content, 'html.parser')
 
-        # 提取標題
-        title = self._extract_title(soup)
+        # 提取標題（優先使用從列表頁預載的標題）
+        title = preloaded_title if preloaded_title else self._extract_title(soup)
         if not title:
             return None
 
