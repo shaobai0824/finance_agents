@@ -156,8 +156,14 @@ class FinancialPlannerAgentLLM(BaseAgent):
     async def _build_prompt(self,
                           query: str,
                           knowledge_results: List[Dict],
-                          personal_context: Dict[str, Any]) -> str:
-        """構建理財規劃專業提示詞"""
+                          personal_context: Dict[str, Any],
+                          user_profile: Dict[str, Any] = None) -> str:
+        """構建理財規劃專業提示詞
+
+        Args:
+            user_profile: 使用者提供的個人資料，優先使用此資料
+            personal_context: 資料庫中的個人財務資料，作為補充
+        """
 
         # 分析查詢領域
         planning_domain = self._classify_planning_domain(query)
@@ -166,9 +172,27 @@ class FinancialPlannerAgentLLM(BaseAgent):
         # 格式化知識上下文
         knowledge_context = self._format_knowledge_context(knowledge_results)
 
-        # 格式化個人財務上下文
+        # 格式化個人資料 - 優先使用 user_profile
         personal_info = ""
-        if personal_context.get("has_customer_data"):
+        if user_profile:
+            # 從前端/API 提供的使用者資料
+            risk_tolerance = user_profile.get('risk_tolerance', 'moderate')
+            risk_profile = self.risk_profiles.get(risk_tolerance, self.risk_profiles['moderate'])
+
+            personal_info = f"""
+使用者個人資料：
+- 年齡: {user_profile.get('age', '未提供')} 歲
+- 風險承受度: {risk_profile['name']} ({risk_tolerance})
+  * 建議股票配置: {risk_profile['stock_allocation']}
+  * 建議債券配置: {risk_profile['bond_allocation']}
+  * 建議現金配置: {risk_profile['cash_allocation']}
+  * 特色: {risk_profile['description']}
+- 收入水平: {user_profile.get('income_level', '未提供')}
+- 投資經驗: {user_profile.get('investment_experience', '未提供')}
+- 財務目標: {', '.join(user_profile.get('financial_goals', ['未提供']))}
+"""
+        elif personal_context.get("has_customer_data"):
+            # 從資料庫查詢的資料（備用）
             sample_customer = personal_context.get("sample_customer", {})
             if sample_customer:
                 personal_info = f"""

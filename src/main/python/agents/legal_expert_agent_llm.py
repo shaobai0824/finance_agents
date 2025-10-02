@@ -131,7 +131,8 @@ class LegalExpertAgentLLM(BaseAgent):
     async def _build_prompt(self,
                           query: str,
                           knowledge_results: List[Dict],
-                          personal_context: Dict[str, Any]) -> str:
+                          personal_context: Dict[str, Any],
+                          user_profile: Dict[str, Any] = None) -> str:
         """構建法律專家專業提示詞"""
 
         # 分析法律問題類型

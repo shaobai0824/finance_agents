@@ -50,7 +50,8 @@ class FinancialAnalystAgentLLM(BaseAgent):
     async def _build_prompt(self,
                           query: str,
                           knowledge_results: List[Dict],
-                          personal_context: Dict[str, Any]) -> str:
+                          personal_context: Dict[str, Any],
+                          user_profile: Dict[str, Any] = None) -> str:
         """構建金融分析專業提示詞"""
 
         # 分析查詢類型
