@@ -40,16 +40,16 @@ class CnyesAutoScraper(BaseScraper):
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        self.base_url = "https://m.cnyes.com"
+        self.base_url = "https://news.cnyes.com"
 
-        # 所有支援的分類（手機版 URL，依用戶需求）
+        # 所有支援的分類（電腦版 URL）
         self.news_categories = {
-            "台股": "https://m.cnyes.com/news/cat/tw_stock",
-            "美股": "https://m.cnyes.com/news/cat/wd_stock",
-            "科技": "https://m.cnyes.com/news/cat/tech",
-            "基金": "https://m.cnyes.com/news/cat/fund",
-            "外匯": "https://m.cnyes.com/news/cat/forex",
-            "理財": "https://m.cnyes.com/news/cat/tw_money"
+            "台股": "https://news.cnyes.com/news/cat/tw_stock",
+            "美股": "https://news.cnyes.com/news/cat/wd_stock",
+            "科技": "https://news.cnyes.com/news/cat/tech",
+            "基金": "https://news.cnyes.com/news/cat/fund",
+            "外匯": "https://news.cnyes.com/news/cat/forex",
+            "理財": "https://news.cnyes.com/news/cat/tw_money"
         }
 
         # 每個分類爬取的新聞數量
@@ -138,9 +138,9 @@ class CnyesAutoScraper(BaseScraper):
         return self._parse_article_detail(url, content, category, preloaded_title)
 
     def _parse_article_list(self, content: str) -> List[Dict[str, str]]:
-        """解析文章清單頁面（手機版）
+        """解析文章清單頁面
 
-        Linus 哲學：簡潔執念 - 從 <a> 標籤的 title 屬性提取標題
+        Linus 哲學：簡潔執念 - 統一處理電腦版和手機版
 
         Returns:
             包含 url 和 title 的字典列表
@@ -149,37 +149,49 @@ class CnyesAutoScraper(BaseScraper):
         articles = []
         seen_urls = set()
 
-        # 方法1：優先尋找有 title 屬性的 <a> 標籤（手機版特徵）
-        news_links_with_title = soup.find_all('a', attrs={'title': True, 'href': re.compile(r'/news/id/\d+')})
+        # 統一方法：尋找所有新聞連結
+        news_links = soup.find_all('a', href=re.compile(r'/news/id/\d+'))
 
-        for link in news_links_with_title:
+        for link in news_links:
             href = link.get('href')
-            title = link.get('title', '').strip()
+            if not href:
+                continue
 
-            if href and title and len(title) > 5:
-                full_url = urljoin(self.base_url, href)
+            full_url = urljoin(self.base_url, href)
 
-                # 去重
-                if full_url not in seen_urls:
-                    articles.append({
-                        'url': full_url,
-                        'title': title
-                    })
-                    seen_urls.add(full_url)
+            # 去重
+            if full_url in seen_urls:
+                continue
 
-        # 方法2：若方法1沒找到，嘗試一般連結
-        if not articles:
-            news_links = soup.find_all('a', href=re.compile(r'/news/id/\d+'))
-            for link in news_links:
-                href = link.get('href')
-                if href:
-                    full_url = urljoin(self.base_url, href)
-                    if full_url not in seen_urls:
-                        articles.append({
-                            'url': full_url,
-                            'title': None  # 稍後從詳細頁面提取
-                        })
-                        seen_urls.add(full_url)
+            # 嘗試從多個來源提取標題
+            title = None
+
+            # 來源1：title 屬性
+            if link.get('title'):
+                title = link.get('title').strip()
+
+            # 來源2：連結文字內容
+            if not title or len(title) <= 5:
+                link_text = link.get_text().strip()
+                if link_text and len(link_text) > 5:
+                    title = link_text
+
+            # 來源3：子元素（h2, h3 等）
+            if not title or len(title) <= 5:
+                for tag in ['h2', 'h3', 'h4']:
+                    heading = link.find(tag)
+                    if heading:
+                        heading_text = heading.get_text().strip()
+                        if heading_text and len(heading_text) > 5:
+                            title = heading_text
+                            break
+
+            # 記錄連結（即使沒有標題也記錄，稍後從詳細頁面提取）
+            articles.append({
+                'url': full_url,
+                'title': title if title and len(title) > 5 else None
+            })
+            seen_urls.add(full_url)
 
         self.logger.info(f"找到 {len(articles)} 個新聞連結 ({sum(1 for a in articles if a['title'])} 個含標題)")
         return articles
